@@ -35,6 +35,14 @@ def cmd_marker(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_board(a: argparse.Namespace) -> int:
+    from .board import board_pdf
+    with open(a.out, "wb") as f:
+        f.write(board_pdf(a.paper))
+    print(f"wrote {a.out}: {a.paper.upper()} calibration board. Print at 100%, check the 100 mm bar, glue flat on foam board.")
+    return 0
+
+
 def _export_all(project, out_dir: str, with_photo: bool) -> None:
     from .export_dxf import drawing_to_dxf
     from .export_svg import drawing_to_png, drawing_to_svg
@@ -55,7 +63,9 @@ def _export_all(project, out_dir: str, with_photo: bool) -> None:
 def cmd_run(a: argparse.Namespace) -> int:
     from .project import Project
     p = Project.from_path(a.photo, root=a.workspace)
-    if a.aruco is not None:
+    if a.board:
+        cal = p.calibrate_board(a.board)
+    elif a.aruco is not None:
         cal = p.calibrate_aruco(a.aruco, a.marker_id)
     elif a.corners:
         c = _floats(a.corners)
@@ -108,12 +118,17 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("--dpi", type=int, default=300); m.add_argument("--out", default="pvsketch-marker.png")
     m.set_defaults(fn=cmd_marker)
 
+    bd = sub.add_parser("board", help="write the printable A3/A4 marker board (PDF, true scale)")
+    bd.add_argument("--paper", default="a3", choices=["a3", "a4"]); bd.add_argument("--out", default="pvsketch-board-a3.pdf")
+    bd.set_defaults(fn=cmd_board)
+
     r = sub.add_parser("run", help="headless: photo -> svg/dxf/png")
     r.add_argument("photo")
     r.add_argument("--sheet", default="a4", choices=["a5", "a4", "a3", "letter"])
     r.add_argument("--ref-mm", default=None, help="custom reference W,H in mm (with --corners)")
     r.add_argument("--corners", default=None, help="x1,y1,x2,y2,x3,y3,x4,y4 of the reference in the photo")
     r.add_argument("--aruco", type=float, default=None, help="marker side in mm; auto-detect the marker")
+    r.add_argument("--board", default=None, choices=["a3", "a4"], help="auto-detect the printed marker board")
     r.add_argument("--marker-id", type=int, default=None)
     r.add_argument("--two-point", default=None, help="x1,y1,x2,y2,dist_mm (scale only)")
     r.add_argument("--rect", default=None, help="x,y,w,h GrabCut box in rectified px")

@@ -66,3 +66,11 @@ label.inline select { width: auto; margin: 0; }
 #dim-table .w-lbl { width: 90px; } #dim-table .w-num { width: 58px; } #dim-table .w-off { width: 46px; }
 #btn-undo:disabled, #btn-redo:disabled { opacity: .35; }
 #seg-result, #ol-result { min-height: 1.2em; }
+
+#checklist { width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0 10px; }
+#checklist td, #checklist th { padding: 3px 3px; border-bottom: 1px solid var(--line); text-align: left; }
+#checklist tr.done td:first-child::before { content: "✓ "; color: var(--ok); }
+#checklist tr.armed td { background: #2a2419; }
+#checklist .hint { color: var(--muted); font-size: 11px; }
+#checklist input { width: 60px; background: #12151a; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; font: inherit; font-size: 12px; }
+#checklist button { padding: 2px 8px; font-size: 12px; }

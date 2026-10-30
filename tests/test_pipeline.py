@@ -137,6 +137,24 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("FINISH", layers); self.assertIn("SKETCH", layers)
         self.project.state["lang"] = "en"; self.project.set_annotations([], [], finishes=[], sketches=[])
 
+    def test_board_and_templates(self):
+        from pvsketch import board as B
+        from pvsketch.templates import checklist_from_template, ELEMENT_TEMPLATES
+        img = B.board_image("a4", dpi=120)
+        bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        h, w = bgr.shape[:2]
+        M = cv2.getPerspectiveTransform(np.float32([[0, 0], [w, 0], [w, h], [0, h]]), np.float32([[60, 40], [w - 30, 20], [w - 90, h - 30], [20, h - 70]]))
+        photo = cv2.warpPerspective(bgr, M, (w, h), borderValue=(100, 100, 100))
+        cal, ids = B.calibrate_board(photo, "a4")
+        self.assertEqual(ids, [0, 1, 2, 3])
+        # the board's own corners must come out at 297 x 210 mm
+        c = cv2.perspectiveTransform(np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 1, 2), M).reshape(-1, 2)
+        r = cal_mod.original_to_rectified(c, cal) / cal.ppm
+        self.assertAlmostEqual(math.dist(r[0], r[1]), 297, delta=1.0); self.assertAlmostEqual(math.dist(r[1], r[2]), 210, delta=1.0)
+        self.assertTrue(B.board_pdf("a3").startswith(b"%PDF"))
+        cl = checklist_from_template("raamdorpel")
+        self.assertTrue(any(c["key"] == "lengte" for c in cl)); self.assertIn("vrij", ELEMENT_TEMPLATES)
+
     def test_exports(self):
         self.project.set_annotations(
             [{"p1": [0, 0], "p2": [300, 0], "auto_mm": 0, "manual_mm": 301.5, "label": "W", "kind": "horizontal", "offset_mm": 15, "style": "dashed"},
@@ -220,6 +238,14 @@ class ServerTest(unittest.TestCase):
             r = c.put(f"/api/projects/{pid}/annotations", json={"dimensions": [], "labels": [], "finishes": [{"polygon": [[bb[0], bb[1]], [bb[2], bb[1]], [bb[2], bb[3]]], "kind": "randslag"}], "sketches": []})
             self.assertTrue(r.get_json()["finishes"][0]["hatch"]["lines"])
             self.assertEqual(c.post("/api/projects/sample").status_code, 200)
+            self.assertEqual(c.get("/api/board/a3.pdf").status_code, 200)
+            self.assertEqual(c.get("/api/templates?lang=nl").get_json()[0]["name"], "Raamdorpel")
+            r = c.put(f"/api/projects/{pid}/template", json={"template": "raamdorpel"})
+            self.assertEqual(r.status_code, 200); cl = r.get_json()["checklist"]; self.assertTrue(cl)
+            cl[1]["value_mm"] = 240
+            r = c.put(f"/api/projects/{pid}/annotations", json={"dimensions": [], "labels": [], "checklist": cl})
+            self.assertEqual(r.get_json()["checklist"][1]["value_mm"], 240)
+            self.assertIn("240.0", c.get(f"/api/projects/{pid}/export.csv").data.decode("utf-8-sig"))
             self.assertEqual(c.get("/healthz").status_code, 200)
 
 

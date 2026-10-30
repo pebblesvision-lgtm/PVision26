@@ -15,6 +15,8 @@ def dimensions_csv(dr: Drawing) -> str:
         w.writerow([f"D{i}", d.label, d.kind, f"{d.value_mm:.1f}", f"{d.auto_mm:.1f}",
                     "" if d.manual_mm is None else f"{d.manual_mm:.1f}",
                     f"{d.p1[0]:.1f}", f"{d.p1[1]:.1f}", f"{d.p2[0]:.1f}", f"{d.p2[1]:.1f}", d.note])
+    for name, v in dr.typed_values():
+        w.writerow(["", name, "value", f"{v:.1f}", "", f"{v:.1f}", "", "", "", "", "typed, not on drawing"])
     bb = dr.outline_bbox()
     if bb:
         w.writerow([]); w.writerow(["outline_bbox_mm", f"{bb[2]-bb[0]:.1f}", f"{bb[3]-bb[1]:.1f}"])

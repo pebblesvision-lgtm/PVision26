@@ -48,7 +48,7 @@
         <button id="btn-camera" class="ghost" data-i18n="photo.camera">Take a photo (phone)</button>
         <button id="btn-sample" class="ghost" data-i18n="photo.sample">Try the sample photo</button>
       </div>
-      <p class="muted small" data-i18n="photo.marker">Need a marker? <a href="/api/marker/0.png?size_mm=100">Download a 100 mm ArUco marker</a> and print it at 100%. Check the printed size with a ruler before use.</p>
+      <p class="muted small" data-i18n="photo.marker">Best reference: the <a href="/api/board/a3.pdf">A3 marker board</a> (or <a href="/api/board/a4.pdf">A4</a>). Print at 100%, check the 100 mm bar with a ruler, glue it flat on foam board. Lay it on the stone face; it is detected automatically. A single <a href="/api/marker/0.png?size_mm=100">100 mm marker</a> or an A4 sheet also works.</p>
       <h3 data-i18n="photo.recent">Recent projects</h3>
       <ul id="project-list" class="list"></ul>
     </div>
@@ -63,7 +63,9 @@
           <option value="a5" data-i18n="cal.a5">A5 sheet (148 x 210 mm)</option>
           <option value="letter">US Letter</option>
           <option value="custom" data-i18n="cal.custom">Custom rectangle (W x H mm)</option>
-          <option value="aruco" data-i18n="cal.aruco">ArUco marker (auto-detect)</option>
+          <option value="board_a3" data-i18n="cal.board3">A3 marker board (auto-detect, best)</option>
+          <option value="board_a4" data-i18n="cal.board4">A4 marker board (auto-detect)</option>
+          <option value="aruco" data-i18n="cal.aruco">Single ArUco marker (auto-detect)</option>
           <option value="two_point" data-i18n="cal.two">Two points (scale only, no perspective fix)</option>
         </select>
       </label>
@@ -152,6 +154,8 @@
     <div class="pane" data-pane="measure" hidden>
       <h2 data-i18n="me.h">5. Measure &amp; register</h2>
       <p class="hint-text" data-i18n="me.p">Click two points for a dimension (snaps to outline corners). Then <b>drag the dimension line</b> away from the stone to keep things tidy, like in CAD. Type the <b>tape-measured value</b> to register it; it goes on the drawing with the photo value in brackets.</p>
+      <label><span data-i18n="me.template">Element template (checklist of required measurements)</span> <select id="tpl-select"><option value="">–</option></select></label>
+      <table id="checklist" hidden><thead><tr><th data-i18n="me.item">Measurement</th><th data-i18n="me.value">mm</th><th></th></tr></thead><tbody></tbody></table>
       <div class="row tools">
         <button class="tool active" data-tool="aligned" data-i18n="me.aligned">Aligned</button>
         <button class="tool" data-tool="horizontal" data-i18n="me.horizontal">Horizontal</button>
