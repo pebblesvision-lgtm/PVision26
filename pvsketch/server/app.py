@@ -18,6 +18,8 @@ from ..export_dxf import drawing_to_dxf
 from ..export_pdf import drawing_to_pdf
 from ..export_svg import drawing_to_png, drawing_to_svg
 from ..export_table import dimensions_csv
+from ..hatch import FINISH_DEFAULTS
+from ..i18n import FINISH_NAMES
 from ..project import DEFAULT_WORKSPACE, Project
 
 MAX_UPLOAD_MB = 60
@@ -134,8 +136,16 @@ def create_app(workspace: str | None = None) -> Flask:
         body = request.get_json(force=True) or {}
         if "name" in body:
             p.state["name"] = str(body["name"])[:80]
+        if body.get("lang") in ("en", "nl"):
+            p.state["lang"] = body["lang"]
+        if isinstance(body.get("titleblock"), dict):
+            p.set_titleblock(body["titleblock"])
         p.save()
         return jsonify(p.state)
+
+    @app.get("/api/finishes")
+    def finishes():
+        return jsonify([{"kind": k, "nl": v[0], "en": v[1], **FINISH_DEFAULTS.get(k, {})} for k, v in FINISH_NAMES.items()])
 
     @app.get("/api/projects/<pid>/image/<kind>")
     def project_image(pid, kind):
@@ -255,7 +265,7 @@ def create_app(workspace: str | None = None) -> Flask:
     def annotations(pid):
         p = load(pid)
         b = request.get_json(force=True) or {}
-        p.set_annotations(b.get("dimensions", []), b.get("labels", []))
+        p.set_annotations(b.get("dimensions", []), b.get("labels", []), b.get("finishes"), b.get("sketches"))
         return jsonify(p.drawing().to_dict())
 
     # ------------------------------------------------------------ export
@@ -264,6 +274,8 @@ def create_app(workspace: str | None = None) -> Flask:
         p = load(pid)
         if not p.calibration:
             return err("nothing to export yet")
+        if request.args.get("lang") in ("en", "nl"):
+            p.state["lang"] = request.args["lang"]
         dr = p.drawing()
         name = (p.state.get("name") or p.id)
         with_photo = request.args.get("photo") == "1"

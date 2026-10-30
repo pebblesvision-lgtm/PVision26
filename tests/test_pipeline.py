@@ -110,6 +110,33 @@ class PipelineTest(unittest.TestCase):
         g = dimension_geometry(v)
         self.assertEqual(g["line"][0][0], -5)
 
+    def test_finishes_and_titleblock(self):
+        from pvsketch.hatch import finish_hatch
+        sq = [[0, 0], [100, 0], [100, 60], [0, 60]]
+        for kind in ("frijnen", "scharreren", "gradineren", "spitsen", "randslag"):
+            h = finish_hatch(sq, kind)
+            self.assertTrue(h["lines"], kind)
+            for p, q in h["lines"]:
+                for x, y in (p, q):
+                    self.assertTrue(-0.01 <= x <= 100.01 and -0.01 <= y <= 60.01, (kind, p, q))
+        self.assertTrue(finish_hatch(sq, "boucharderen")["dots"])
+        self.assertEqual(finish_hatch(sq, "gezoet"), {"lines": [], "dots": []})
+        self.project.state["lang"] = "nl"
+        self.project.set_titleblock({"project": "Westgevel", "element": "R-03", "material": "Bentheimer", "quantity": "2"})
+        self.project.set_annotations([], [], finishes=[{"polygon": sq, "kind": "frijnen"}],
+                                     sketches=[{"points": [[0, 0], [50, 50]], "arrow": True, "text": "scheur", "style": "dashed"}])
+        dr = self.project.drawing()
+        self.assertEqual(dr.lang, "nl"); self.assertEqual(dr.finishes[0].id, "F1")
+        svg = drawing_to_svg(dr)
+        self.assertIn("productietekening", svg); self.assertIn("F1 gefrijnd", svg); self.assertIn("Bentheimer", svg); self.assertIn("scheur", svg)
+        pdf = drawing_to_pdf(dr)
+        self.assertIn(b"gefrijnd", pdf); self.assertIn(b"Westgevel", pdf)
+        path = os.path.join(self.tmp.name, "fin.dxf"); drawing_to_dxf(dr, path)
+        import ezdxf
+        layers = {e.dxf.layer for e in ezdxf.readfile(path).modelspace()}
+        self.assertIn("FINISH", layers); self.assertIn("SKETCH", layers)
+        self.project.state["lang"] = "en"; self.project.set_annotations([], [], finishes=[], sketches=[])
+
     def test_exports(self):
         self.project.set_annotations(
             [{"p1": [0, 0], "p2": [300, 0], "auto_mm": 0, "manual_mm": 301.5, "label": "W", "kind": "horizontal", "offset_mm": 15, "style": "dashed"},
@@ -187,6 +214,13 @@ class ServerTest(unittest.TestCase):
             self.assertEqual(r.status_code, 200, r.data)
             self.assertEqual(c.get(f"/api/projects/{pid}/image/overlay").status_code, 200)
             self.assertEqual(c.get("/api/marker/0.png?size_mm=80").status_code, 200)
+            self.assertEqual(c.get("/api/finishes").get_json()[0]["kind"], "frijnen")
+            r = c.patch(f"/api/projects/{pid}", json={"lang": "nl", "titleblock": {"project": "P1", "bogus": "x"}})
+            self.assertEqual(r.get_json()["titleblock"], {"project": "P1"}); self.assertEqual(r.get_json()["lang"], "nl")
+            r = c.put(f"/api/projects/{pid}/annotations", json={"dimensions": [], "labels": [], "finishes": [{"polygon": [[bb[0], bb[1]], [bb[2], bb[1]], [bb[2], bb[3]]], "kind": "randslag"}], "sketches": []})
+            self.assertTrue(r.get_json()["finishes"][0]["hatch"]["lines"])
+            self.assertEqual(c.post("/api/projects/sample").status_code, 200)
+            self.assertEqual(c.get("/healthz").status_code, 200)
 
 
 if __name__ == "__main__":

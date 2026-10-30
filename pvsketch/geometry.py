@@ -95,10 +95,10 @@ class Dimension:
             return abs(dy)
         return math.hypot(dx, dy)
 
-    def text(self) -> str:
+    def text(self, lang: str = "en") -> str:
         t = f"{self.value_mm:.1f}"
         if self.manual_mm is not None and abs(self.manual_mm - self.auto_mm) > 0.05:
-            t += f" (photo {self.auto_mm:.1f})"
+            t += f" ({'foto' if lang == 'nl' else 'photo'} {self.auto_mm:.1f})"
         if self.label:
             t = f"{self.label}: {t}"
         return t
@@ -124,7 +124,7 @@ class Dimension:
         )
 
 
-def dimension_geometry(dim: Dimension) -> dict[str, Any]:
+def dimension_geometry(dim: Dimension, lang: str = "en") -> dict[str, Any]:
     """Where to draw a dimension: extension lines, dimension line, text anchor.
 
     Returned points are in mm (y-down). The same construction is mirrored in
@@ -154,7 +154,7 @@ def dimension_geometry(dim: Dimension) -> dict[str, Any]:
         if ang > 90 or ang < -90:
             ang += 180
     mid = ((q1[0] + q2[0]) / 2, (q1[1] + q2[1]) / 2)
-    return {"ext": ext, "line": (q1, q2), "mid": mid, "angle_deg": ang, "text": dim.text()}
+    return {"ext": ext, "line": (q1, q2), "mid": mid, "angle_deg": ang, "text": dim.text(lang)}
 
 
 @dataclass
@@ -172,6 +172,59 @@ class Label:
 
 
 @dataclass
+class Finish:
+    """A surface finish region: polygon (mm) hatched according to ``kind``
+    (Dutch stonemason term, see i18n.FINISH_NAMES / hatch.FINISH_DEFAULTS)."""
+    polygon: list[Point]
+    kind: str = "frijnen"
+    angle_deg: float | None = None
+    spacing_mm: float | None = None
+    width_mm: float | None = None   # randslag band width
+    label: str = ""
+    id: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        from .hatch import finish_hatch, centroid
+        d = asdict(self)
+        d["polygon"] = [list(p) for p in self.polygon]
+        d["hatch"] = finish_hatch(self.polygon, self.kind, self.angle_deg, self.spacing_mm, self.width_mm)
+        d["centroid"] = list(centroid(self.polygon))
+        return d
+
+    @staticmethod
+    def from_dict(d: dict[str, Any]) -> "Finish":
+        def opt(v):
+            return None if v in (None, "") else float(v)
+        return Finish(polygon=[(float(p[0]), float(p[1])) for p in d.get("polygon", [])],
+                      kind=str(d.get("kind") or "frijnen"), angle_deg=opt(d.get("angle_deg")),
+                      spacing_mm=opt(d.get("spacing_mm")), width_mm=opt(d.get("width_mm")),
+                      label=str(d.get("label", "")), id=str(d.get("id", "")))
+
+
+@dataclass
+class Sketch:
+    """Free annotation line: polyline (mm) with a style, optional arrow head
+    at the last point and optional text at the first point (leader)."""
+    points: list[Point]
+    style: str = "solid"
+    arrow: bool = False
+    text: str = ""
+    id: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["points"] = [list(p) for p in self.points]
+        return d
+
+    @staticmethod
+    def from_dict(d: dict[str, Any]) -> "Sketch":
+        style = d.get("style") or "solid"
+        return Sketch(points=[(float(p[0]), float(p[1])) for p in d.get("points", [])],
+                      style=style if style in ("solid", "dashed", "dotted") else "solid",
+                      arrow=bool(d.get("arrow", False)), text=str(d.get("text", "")), id=str(d.get("id", "")))
+
+
+@dataclass
 class Drawing:
     """Everything needed to render/export one production drawing (mm, y-down)."""
     width_mm: float
@@ -180,7 +233,14 @@ class Drawing:
     detail: list[Polyline] = field(default_factory=list)
     dimensions: list[Dimension] = field(default_factory=list)
     labels: list[Label] = field(default_factory=list)
+    finishes: list[Finish] = field(default_factory=list)
+    sketches: list[Sketch] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
+    titleblock: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def lang(self) -> str:
+        return self.meta.get("lang", "en")
 
     def outline_bbox(self) -> tuple[float, float, float, float] | None:
         xs: list[float] = []
@@ -200,7 +260,10 @@ class Drawing:
             "detail": [p.to_dict() for p in self.detail],
             "dimensions": [d.to_dict() for d in self.dimensions],
             "labels": [l.to_dict() for l in self.labels],
+            "finishes": [f.to_dict() for f in self.finishes],
+            "sketches": [s.to_dict() for s in self.sketches],
             "meta": self.meta,
+            "titleblock": self.titleblock,
             "bbox": self.outline_bbox(),
         }
 

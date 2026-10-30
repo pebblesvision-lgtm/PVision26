@@ -24,7 +24,9 @@ import numpy as np
 from . import calibrate as cal_mod
 from . import contour as contour_mod
 from . import segment as seg_mod
-from .geometry import Dimension, Drawing, Label, Polyline, primitive_from_dict
+from .geometry import Dimension, Drawing, Finish, Label, Polyline, Sketch, primitive_from_dict
+
+TITLEBLOCK_FIELDS = ("project", "element", "material", "quantity", "finish", "drawn_by", "notes")
 
 DEFAULT_WORKSPACE = os.environ.get("PVSKETCH_WORKSPACE", os.path.join(os.getcwd(), "workspace"))
 
@@ -38,9 +40,37 @@ DEFAULT_OUTLINE_PARAMS: dict[str, Any] = {
 }
 
 
+def _decode_with_pillow(data: bytes, filename: str):
+    """HEIC/HEIF from iPhones (via pillow-heif when installed) and anything
+    else Pillow knows: re-encode to JPEG so the rest of the pipeline is plain."""
+    try:
+        from PIL import Image, ImageOps
+        try:
+            import pillow_heif  # type: ignore[import-not-found]
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            pass
+        import io as _io
+        im = Image.open(_io.BytesIO(data))
+        im = ImageOps.exif_transpose(im).convert("RGB")
+        buf = _io.BytesIO()
+        im.save(buf, format="JPEG", quality=95)
+        jpg = buf.getvalue()
+        img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+        return img, jpg, os.path.splitext(filename)[0] + ".jpg"
+    except Exception:  # noqa: BLE001 - any decode failure means "unsupported"
+        return None, data, filename
+
+
 def _safe_name(name: str) -> str:
     base = os.path.basename(name or "photo")
     return re.sub(r"[^A-Za-z0-9._-]+", "_", base)[:80] or "photo"
+
+
+def asdict_finish(f: Finish) -> dict[str, Any]:
+    """Finish without the computed hatch (that is derived on read)."""
+    return {"polygon": [list(p) for p in f.polygon], "kind": f.kind, "angle_deg": f.angle_deg,
+            "spacing_mm": f.spacing_mm, "width_mm": f.width_mm, "label": f.label, "id": f.id}
 
 
 class Project:
@@ -60,6 +90,10 @@ class Project:
             "detail": None,              # list of polyline dicts (mm)
             "dimensions": [],
             "labels": [],
+            "finishes": [],
+            "sketches": [],
+            "titleblock": {},
+            "lang": "en",
         }
         self._cache: dict[str, Any] = {}
 
@@ -90,7 +124,9 @@ class Project:
         arr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
-            raise ValueError("could not decode image (use JPEG/PNG/TIFF/BMP/WebP)")
+            img, image_bytes, filename = _decode_with_pillow(image_bytes, filename)
+        if img is None:
+            raise ValueError("could not decode image (JPEG/PNG/TIFF/WebP; HEIC needs the pillow-heif package)")
         pid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
         p = cls(pid, root)
         os.makedirs(p.dir, exist_ok=True)
@@ -291,7 +327,17 @@ class Project:
         return self.drawing().to_dict()
 
     # ------------------------------------------------------------ annotations
-    def set_annotations(self, dimensions: list[dict[str, Any]], labels: list[dict[str, Any]]) -> None:
+    def set_titleblock(self, fields: dict[str, Any]) -> None:
+        tb = dict(self.state.get("titleblock") or {})
+        for k in TITLEBLOCK_FIELDS:
+            if k in fields:
+                tb[k] = str(fields[k] or "")[:120]
+        self.state["titleblock"] = tb
+        self.save()
+
+    def set_annotations(self, dimensions: list[dict[str, Any]], labels: list[dict[str, Any]],
+                        finishes: list[dict[str, Any]] | None = None,
+                        sketches: list[dict[str, Any]] | None = None) -> None:
         cal = self.calibration
         dims = []
         for i, d in enumerate(dimensions):
@@ -307,6 +353,25 @@ class Project:
             labs.append(lab.to_dict())
         self.state["dimensions"] = dims
         self.state["labels"] = labs
+        if finishes is not None:
+            fins = []
+            for i, f in enumerate(finishes):
+                fin = Finish.from_dict(f)
+                if len(fin.polygon) < 3:
+                    continue
+                fin.id = f"F{len(fins)+1}"
+                d = asdict_finish(fin)
+                fins.append(d)
+            self.state["finishes"] = fins
+        if sketches is not None:
+            sks = []
+            for i, sk in enumerate(sketches):
+                ske = Sketch.from_dict(sk)
+                if len(ske.points) < 1:
+                    continue
+                ske.id = f"S{len(sks)+1}"
+                sks.append(ske.to_dict())
+            self.state["sketches"] = sks
         self.save()
 
     # ---------------------------------------------------------------- drawing
@@ -319,6 +384,10 @@ class Project:
         dr.detail = [primitive_from_dict(d) for d in (self.state.get("detail") or [])]  # type: ignore[misc]
         dr.dimensions = [Dimension.from_dict(d) for d in self.state.get("dimensions", [])]
         dr.labels = [Label.from_dict(l) for l in self.state.get("labels", [])]
+        dr.finishes = [Finish.from_dict(f) for f in self.state.get("finishes", []) or []]
+        dr.sketches = [Sketch.from_dict(s) for s in self.state.get("sketches", []) or []]
+        dr.titleblock = dict(self.state.get("titleblock") or {})
         dr.meta = {"name": self.state.get("name", ""), "source": self.state.get("original", ""),
-                   "calibration": cal.note, "ppm": cal.ppm, "project": self.id}
+                   "calibration": cal.note, "ppm": cal.ppm, "project": self.id,
+                   "lang": self.state.get("lang", "en")}
         return dr

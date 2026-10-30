@@ -52,6 +52,29 @@ sleep. Download the *Project JSON* or the exports you want to keep. For real
 use, run it on a machine of your own (the Docker image below, or the Quick
 start above) where the `workspace` folder stays.
 
+**Cloudflare (recommended if you already use it).** Cloudflare Pages/Workers
+cannot run this app (it needs Python + OpenCV on a real CPU), but a
+**Cloudflare Tunnel** publishes the app running on your own Mac, NAS or a small
+VPS on your own domain, with Cloudflare Access in front for login. Projects stay
+on your machine. `docker-compose.yml` has both containers:
+
+1. Cloudflare dashboard → Zero Trust → Networks → Tunnels → *Create a tunnel*
+   (Cloudflared). Copy the token.
+2. Public hostname: `sketch.yourdomain.nl` → service `http://pvsketch:8000`.
+3. Copy `.env.example` to `.env`, fill in the token and a password, then:
+
+```bash
+docker compose up -d --build
+```
+
+4. Optional: Zero Trust → Access → Applications → add `sketch.yourdomain.nl`
+   with a policy "e-mail ends with @yourcompany.nl". Then the basic-auth
+   password is a second lock behind Cloudflare's login.
+
+Without Docker, the quick way to try it is to run the app locally and
+`brew install cloudflared && cloudflared tunnel --url http://localhost:5000`,
+which prints a temporary public URL (set `PVSKETCH_PASSWORD` first).
+
 **Any Docker host** (Fly.io, Railway, Hugging Face Spaces, a NAS, a VPS):
 
 ```bash
@@ -63,6 +86,12 @@ docker run -p 8000:8000 -e PVSKETCH_PASSWORD=choose-one -v $PWD/workspace:/data/
 ```
 
 Then open <http://localhost:8000>. The `-v` keeps projects on the host disk.
+
+## Language
+
+The interface switches between English and Nederlands with the EN/NL control
+top right. The language is also stored per project and used for the exported
+drawings (title block, "foto" in dimensions, finish names).
 
 ## How to photograph
 
@@ -88,7 +117,8 @@ lie **in the same plane**.
 | 3 Isolate | **Points**: click along the outer line (roughly), Run | GrabCut only looks for the exact edge inside a band around your points, so grey stone on a grey wall works. Or drag a **Box**. Correct with *stone* / *background* brushes and the **Eraser**; undo/redo everything. Tick *use the points exactly* to skip GrabCut |
 | 4 Outline | Douglas-Peucker simplification + least-squares **arc fitting** | Tolerance in mm, minimum arc radius/length so weathering bumps don't become arcs. **Edit vertices**: drag, double-click to add, Alt+click to delete (an arc becomes a line). Optional *detail* layer: Canny inside the stone after grain smoothing |
 | 5 Measure | Click 2 points → **aligned / horizontal / vertical** dimension (snaps to corners) | **Drag the dimension line** away from the stone, CAD-style, with extension lines. Solid / dashed / dotted. *Tidy up* fans them out. Type the **tape value** to register it; the drawing shows it with the photo value in brackets. D1…Dn numbering matches the table, CSV and PDF |
-| 6 Export | DXF 2010, DXF R12, SVG, **PDF at true scale** (A4/A3 auto, 1:2 / 1:5 when it doesn't fit), CSV of measurements, PNG, JSON | All in mm. DXF: layers `OUTLINE`, `DETAIL`, `DIM`, `TEXT`, `$INSUNITS` = mm. R12 uses POLYLINE and exploded dimensions for old CAM/CAD software |
+| 6 Draw | **Finish regions** (bewerkingen) and free lines | Click a polygon on the face and pick the finish: gefrijnd, gescharreerd, gegradineerd, gebouchardeerd, gespitst, randslag, gezoet, gepolijst, gezaagd, gevlamd, geschuurd. It is hatched with the matching pattern (direction and spacing adjustable), labelled F1…Fn and listed in the title block. Lines/arrows/leader text in solid, dashed or dotted |
+| 7 Export | DXF 2010, DXF R12, SVG, **PDF at true scale** (A4/A3 auto, 1:2 / 1:5 when it doesn't fit), CSV of measurements, PNG, JSON | All in mm. DXF: layers `OUTLINE`, `DETAIL`, `DIM`, `TEXT`, `$INSUNITS` = mm. R12 uses POLYLINE and exploded dimensions for old CAM/CAD software |
 
 Viewer: wheel = zoom, right-drag (or shift-drag) = pan, `f` = fit, `Esc` = cancel,
 Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z redo. Isolate shortcuts: `p` points, `b` box,
@@ -139,10 +169,12 @@ pvsketch/
   export_dxf.py  DXF via ezdxf (y flipped to CAD y-up), R2010 or R12
   export_pdf.py  dependency-free vector PDF at true scale with title block + table
   export_table.py CSV of the registered measurements
+  hatch.py       hatch patterns for hand finishes (lines, groups, dots, strokes, edge ticks)
+  i18n.py        strings for exported drawings (en/nl) and finish names
   project.py     per-project folder: original, rectified.jpg, mask.png, project.json
   server/        Flask API + single-page UI (vanilla JS, no CDN, works offline)
   __main__.py    serve / run / export / marker
-Dockerfile, render.yaml   web deployment (gunicorn, basic-auth password, retention)
+Dockerfile, render.yaml, docker-compose.yml   web deployment (gunicorn, password, Cloudflare Tunnel)
 samples/make_sample.py   synthetic test photo with ground truth
 tests/test_pipeline.py   end-to-end checks (python -m unittest)
 ```

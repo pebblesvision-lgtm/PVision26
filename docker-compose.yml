@@ -1,0 +1,30 @@
+# Run pvsketch on your own machine/NAS and publish it through a Cloudflare Tunnel.
+#
+#   1. In Cloudflare Zero Trust: Networks > Tunnels > Create tunnel (Cloudflared),
+#      copy the token, put it in a .env file next to this one:  TUNNEL_TOKEN=eyJ...
+#      Public hostname: e.g. sketch.yourdomain.nl  ->  http://pvsketch:8000
+#   2. Choose a password:                                      PVSKETCH_PASSWORD=...
+#   3. docker compose up -d
+#
+# Optionally add a Cloudflare Access policy (Zero Trust > Access) on the hostname
+# so only your e-mail addresses can even reach the login.
+services:
+  pvsketch:
+    build: .
+    restart: unless-stopped
+    environment:
+      PVSKETCH_PASSWORD: ${PVSKETCH_PASSWORD:-}
+      PVSKETCH_RETENTION_DAYS: ${PVSKETCH_RETENTION_DAYS:-0}
+    volumes:
+      - ./workspace:/data/workspace      # projects stay on this machine
+    ports:
+      - "127.0.0.1:8000:8000"            # local access; the tunnel reaches it internally
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      - pvsketch

@@ -8,24 +8,27 @@
 </head>
 <body>
 <header>
-  <div class="brand">pvsketch <span class="muted">photo &rarr; true-scale outline (offline)</span></div>
+  <div class="brand">pvsketch <span class="muted" data-i18n="brand.sub">photo &rarr; true-scale outline (offline)</span></div>
   <div id="project-title" class="muted"></div>
   <div class="header-right">
-    <button id="btn-undo" class="ghost" title="Undo (Ctrl/Cmd+Z)">&#8630; Undo</button>
-    <button id="btn-redo" class="ghost" title="Redo (Ctrl/Cmd+Shift+Z)">&#8631; Redo</button>
-    <button id="btn-projects" class="ghost">Projects</button>
-    <button id="btn-new" class="ghost">New photo</button>
+    <select id="lang" title="Language / Taal"><option value="en">EN</option><option value="nl">NL</option></select>
+    <button id="btn-undo" class="ghost" title="Ctrl/Cmd+Z">&#8630; <span data-i18n="undo">Undo</span></button>
+    <button id="btn-redo" class="ghost" title="Ctrl/Cmd+Shift+Z">&#8631; <span data-i18n="redo">Redo</span></button>
+    <button id="btn-projects" class="ghost" data-i18n="projects">Projects</button>
+    <button id="btn-new" class="ghost" data-i18n="newphoto">New photo</button>
     <input type="file" id="file-input" accept="image/*" hidden>
+    <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
   </div>
 </header>
 
 <nav id="steps">
-  <button data-step="photo"     class="step">1 <span>Photo</span></button>
-  <button data-step="calibrate" class="step" disabled>2 <span>Calibrate</span></button>
-  <button data-step="isolate"   class="step" disabled>3 <span>Isolate</span></button>
-  <button data-step="outline"   class="step" disabled>4 <span>Outline</span></button>
-  <button data-step="measure"   class="step" disabled>5 <span>Measure</span></button>
-  <button data-step="export"    class="step" disabled>6 <span>Export</span></button>
+  <button data-step="photo"     class="step">1 <span data-i18n="step.photo">Photo</span></button>
+  <button data-step="calibrate" class="step" disabled>2 <span data-i18n="step.calibrate">Calibrate</span></button>
+  <button data-step="isolate"   class="step" disabled>3 <span data-i18n="step.isolate">Isolate</span></button>
+  <button data-step="outline"   class="step" disabled>4 <span data-i18n="step.outline">Outline</span></button>
+  <button data-step="measure"   class="step" disabled>5 <span data-i18n="step.measure">Measure</span></button>
+  <button data-step="draw"      class="step" disabled>6 <span data-i18n="step.draw">Draw</span></button>
+  <button data-step="export"    class="step" disabled>7 <span data-i18n="step.export">Export</span></button>
 </nav>
 
 <main>
@@ -38,154 +41,200 @@
   <aside id="panel">
     <!-- 1 photo -->
     <div class="pane" data-pane="photo">
-      <h2>1. Photo</h2>
-      <p>Photograph the stone face <b>square-on if you can</b>, with a reference of known size lying flat <b>in the same plane</b> as the face you want to measure: an A4 sheet, a printed marker, or a ruler.</p>
-      <div id="dropzone">Drop a photo here or click to choose<br><span class="muted">JPEG / PNG, up to 60 MB</span></div>
-      <button id="btn-sample" class="ghost" style="width:100%">Try it with the sample photo (300 x 180 mm test stone + A4 sheet)</button>
-      <p class="muted small">Need a marker? <a href="/api/marker/0.png?size_mm=100">Download a 100 mm ArUco marker</a> and print it at 100%. Check the printed size with a ruler before use.</p>
-      <h3>Recent projects</h3>
+      <h2 data-i18n="photo.h">1. Photo</h2>
+      <p data-i18n="photo.p">Photograph the stone face <b>square-on if you can</b>, with a reference of known size lying flat <b>in the same plane</b> as the face you want to measure: an A4 sheet, a printed marker, or a ruler.</p>
+      <div id="dropzone" data-i18n="photo.drop">Drop a photo here or click to choose<br><span class="muted">JPEG / PNG / HEIC, up to 60 MB</span></div>
+      <div class="row">
+        <button id="btn-camera" class="ghost" data-i18n="photo.camera">Take a photo (phone)</button>
+        <button id="btn-sample" class="ghost" data-i18n="photo.sample">Try the sample photo</button>
+      </div>
+      <p class="muted small" data-i18n="photo.marker">Need a marker? <a href="/api/marker/0.png?size_mm=100">Download a 100 mm ArUco marker</a> and print it at 100%. Check the printed size with a ruler before use.</p>
+      <h3 data-i18n="photo.recent">Recent projects</h3>
       <ul id="project-list" class="list"></ul>
     </div>
 
     <!-- 2 calibrate -->
     <div class="pane" data-pane="calibrate" hidden>
-      <h2>2. Calibrate scale &amp; perspective</h2>
-      <label>Reference
+      <h2 data-i18n="cal.h">2. Calibrate scale &amp; perspective</h2>
+      <label><span data-i18n="cal.ref">Reference</span>
         <select id="cal-mode">
-          <option value="a4">A4 sheet (210 x 297 mm)</option>
-          <option value="a3">A3 sheet (297 x 420 mm)</option>
-          <option value="a5">A5 sheet (148 x 210 mm)</option>
+          <option value="a4" data-i18n="cal.a4">A4 sheet (210 x 297 mm)</option>
+          <option value="a3" data-i18n="cal.a3">A3 sheet (297 x 420 mm)</option>
+          <option value="a5" data-i18n="cal.a5">A5 sheet (148 x 210 mm)</option>
           <option value="letter">US Letter</option>
-          <option value="custom">Custom rectangle (W x H mm)</option>
-          <option value="aruco">ArUco marker (auto-detect)</option>
-          <option value="two_point">Two points (scale only, no perspective fix)</option>
+          <option value="custom" data-i18n="cal.custom">Custom rectangle (W x H mm)</option>
+          <option value="aruco" data-i18n="cal.aruco">ArUco marker (auto-detect)</option>
+          <option value="two_point" data-i18n="cal.two">Two points (scale only, no perspective fix)</option>
         </select>
       </label>
       <div id="cal-custom" hidden class="row">
-        <label>Width mm <input id="cal-w" type="number" value="210" step="0.1"></label>
-        <label>Height mm <input id="cal-h" type="number" value="297" step="0.1"></label>
+        <label><span data-i18n="cal.w">Width mm</span> <input id="cal-w" type="number" value="210" step="0.1"></label>
+        <label><span data-i18n="cal.hh">Height mm</span> <input id="cal-h" type="number" value="297" step="0.1"></label>
       </div>
       <div id="cal-aruco" hidden class="row">
-        <label>Marker side mm <input id="cal-marker-mm" type="number" value="100" step="0.1"></label>
-        <button id="btn-aruco-detect" class="ghost">Detect</button>
+        <label><span data-i18n="cal.markermm">Marker side mm</span> <input id="cal-marker-mm" type="number" value="100" step="0.1"></label>
+        <button id="btn-aruco-detect" class="ghost" data-i18n="cal.detect">Detect</button>
         <span id="aruco-result" class="muted small"></span>
       </div>
       <div id="cal-two" hidden class="row">
-        <label>Distance mm <input id="cal-dist" type="number" value="500" step="0.1"></label>
+        <label><span data-i18n="cal.dist">Distance mm</span> <input id="cal-dist" type="number" value="500" step="0.1"></label>
       </div>
-      <p id="cal-instructions" class="hint-text">Click the <b>4 corners</b> of the sheet in the photo (any order). Zoom with the wheel for precision; drag with the right mouse button to pan.</p>
+      <p id="cal-instructions" class="hint-text"></p>
       <div class="row">
-        <button id="btn-cal-clear" class="ghost">Clear points</button>
-        <button id="btn-calibrate" class="primary">Calibrate</button>
+        <button id="btn-cal-clear" class="ghost" data-i18n="cal.clear">Clear points</button>
+        <button id="btn-calibrate" class="primary" data-i18n="cal.go">Calibrate</button>
       </div>
       <div id="cal-result" class="result"></div>
-      <details><summary>Advanced</summary>
-        <label>Pixels per mm in rectified image (blank = auto) <input id="cal-ppm" type="number" step="0.1" placeholder="auto"></label>
+      <details><summary data-i18n="advanced">Advanced</summary>
+        <label><span data-i18n="cal.ppm">Pixels per mm in rectified image (blank = auto)</span> <input id="cal-ppm" type="number" step="0.1" placeholder="auto"></label>
       </details>
     </div>
 
     <!-- 3 isolate -->
     <div class="pane" data-pane="isolate" hidden>
-      <h2>3. Isolate the stone</h2>
-      <p class="hint-text">Best on real stone: <b>Points</b> - click along the outer line (roughly is fine), then <b>Run</b>. GrabCut only searches for the exact edge inside the band around your points. Or drag a <b>Box</b>. Fix mistakes with the brushes and the <b>Eraser</b>, undo with Ctrl/Cmd+Z.</p>
+      <h2 data-i18n="iso.h">3. Isolate the stone</h2>
+      <p class="hint-text" data-i18n="iso.p">Best on real stone: <b>Points</b> - click along the outer line (roughly is fine), then <b>Run</b>. GrabCut only searches for the exact edge inside the band around your points. Or drag a <b>Box</b>. Fix mistakes with the brushes and the <b>Eraser</b>, undo with Ctrl/Cmd+Z.</p>
       <div class="row tools">
-        <button class="tool active" data-tool="points" title="Click points along the outer line. Drag a point to move it, Backspace removes the last one.">Points</button>
-        <button class="tool" data-tool="box" title="Drag a box around the stone">Box</button>
+        <button class="tool active" data-tool="points" data-i18n="iso.points">Points</button>
+        <button class="tool" data-tool="box" data-i18n="iso.box">Box</button>
       </div>
       <div class="row tools">
-        <button class="tool" data-tool="fg" title="Paint: this is stone">Stone brush</button>
-        <button class="tool" data-tool="bg" title="Paint: this is background">Background brush</button>
-        <button class="tool" data-tool="erase" title="Remove paint">Eraser</button>
+        <button class="tool" data-tool="fg" data-i18n="iso.fg">Stone brush</button>
+        <button class="tool" data-tool="bg" data-i18n="iso.bg">Background brush</button>
+        <button class="tool" data-tool="erase" data-i18n="iso.erase">Eraser</button>
       </div>
-      <label>Brush size <input id="brush-size" type="range" min="2" max="80" value="14"> <span id="brush-size-v">14</span> px</label>
-      <label>Search band around the points <input id="band-mm" type="range" min="2" max="40" step="1" value="10"> <span id="band-mm-v">10</span> mm</label>
-      <label><input id="seg-exact" type="checkbox"> Use the points exactly as the outline (skip GrabCut)</label>
-      <label>GrabCut iterations <input id="gc-iters" type="number" min="1" max="20" value="5"></label>
+      <label><span data-i18n="iso.brush">Brush size</span> <input id="brush-size" type="range" min="2" max="80" value="14"> <span id="brush-size-v">14</span> px</label>
+      <label><span data-i18n="iso.band">Search band around the points</span> <input id="band-mm" type="range" min="2" max="40" step="1" value="10"> <span id="band-mm-v">10</span> mm</label>
+      <label><input id="seg-exact" type="checkbox"> <span data-i18n="iso.exact">Use the points exactly as the outline (skip GrabCut)</span></label>
+      <label><span data-i18n="iso.iters">GrabCut iterations</span> <input id="gc-iters" type="number" min="1" max="20" value="5"></label>
       <div class="row">
-        <button id="btn-seg-clear-points" class="ghost">Clear points</button>
-        <button id="btn-seg-clear" class="ghost">Clear paint</button>
-        <button id="btn-segment" class="primary">Run</button>
+        <button id="btn-seg-clear-points" class="ghost" data-i18n="iso.clearpts">Clear points</button>
+        <button id="btn-seg-clear" class="ghost" data-i18n="iso.clearpaint">Clear paint</button>
+        <button id="btn-segment" class="primary" data-i18n="run">Run</button>
       </div>
       <div id="seg-result" class="result"></div>
     </div>
 
     <!-- 4 outline -->
     <div class="pane" data-pane="outline" hidden>
-      <h2>4. Outline</h2>
-      <label>Simplification tolerance <input id="ol-eps" type="range" min="0.2" max="8" step="0.1" value="1.0"> <span id="ol-eps-v">1.0</span> mm</label>
-      <label><input id="ol-arcs" type="checkbox" checked> Fit arcs (curves become true circular arcs)</label>
+      <h2 data-i18n="ol.h">4. Outline</h2>
+      <label><span data-i18n="ol.eps">Simplification tolerance</span> <input id="ol-eps" type="range" min="0.2" max="8" step="0.1" value="1.0"> <span id="ol-eps-v">1.0</span> mm</label>
+      <label><input id="ol-arcs" type="checkbox" checked> <span data-i18n="ol.arcs">Fit arcs (curves become true circular arcs)</span></label>
       <div class="row">
-        <label>Min arc radius mm <input id="ol-minr" type="number" min="0" step="1" value="15"></label>
-        <label>Min arc length mm <input id="ol-minlen" type="number" min="0" step="1" value="12"></label>
+        <label><span data-i18n="ol.minr">Min arc radius mm</span> <input id="ol-minr" type="number" min="0" step="1" value="15"></label>
+        <label><span data-i18n="ol.minlen">Min arc length mm</span> <input id="ol-minlen" type="number" min="0" step="1" value="12"></label>
       </div>
-      <label>Contour smoothing <input id="ol-smooth" type="number" min="1" max="25" value="5"> px</label>
-      <h3>Detail lines (inside the stone)</h3>
-      <label><input id="dt-on" type="checkbox"> Trace tooling marks / breaks / mouldings</label>
+      <label><span data-i18n="ol.smooth">Contour smoothing</span> <input id="ol-smooth" type="number" min="1" max="25" value="5"> px</label>
+      <h3 data-i18n="ol.detail">Detail lines (inside the stone)</h3>
+      <label><input id="dt-on" type="checkbox"> <span data-i18n="ol.dton">Trace tooling marks / breaks / mouldings</span></label>
       <div class="row">
-        <label>Canny low <input id="dt-low" type="number" value="30"></label>
-        <label>high <input id="dt-high" type="number" value="90"></label>
-      </div>
-      <div class="row">
-        <label>Min length mm <input id="dt-minlen" type="number" value="15"></label>
-        <label>Grain smoothing <input id="dt-smooth" type="number" min="0" max="15" value="5"></label>
+        <label>Canny <span data-i18n="low">low</span> <input id="dt-low" type="number" value="30"></label>
+        <label><span data-i18n="high">high</span> <input id="dt-high" type="number" value="90"></label>
       </div>
       <div class="row">
-        <button id="btn-outline" class="primary">Extract outline</button>
+        <label><span data-i18n="ol.minlenmm">Min length mm</span> <input id="dt-minlen" type="number" value="15"></label>
+        <label><span data-i18n="ol.grain">Grain smoothing</span> <input id="dt-smooth" type="number" min="0" max="15" value="5"></label>
+      </div>
+      <div class="row">
+        <button id="btn-outline" class="primary" data-i18n="ol.go">Extract outline</button>
       </div>
       <div id="ol-result" class="result"></div>
-      <h3>Edit by hand</h3>
+      <h3 data-i18n="ol.edith">Edit by hand</h3>
       <div class="row tools">
-        <button class="tool active" data-tool="view">View</button>
-        <button class="tool" data-tool="edit" title="Drag a vertex to move it. Double-click a segment to add a vertex. Alt+click (or Delete after selecting) removes a vertex; removing an arc turns it into a straight line.">Edit vertices</button>
+        <button class="tool active" data-tool="view" data-i18n="ol.view">View</button>
+        <button class="tool" data-tool="edit" data-i18n="ol.edit">Edit vertices</button>
       </div>
-      <p class="muted small">Drag vertices, double-click a line to add one, Alt+click to delete. Re-extracting replaces your edits.</p>
-      <label><input id="show-photo" type="checkbox" checked> Show photo under the drawing</label>
+      <p class="muted small" data-i18n="ol.editp">Drag vertices, double-click a line to add one, Alt+click to delete. Re-extracting replaces your edits.</p>
+      <label><input id="show-photo" type="checkbox" checked> <span data-i18n="showphoto">Show photo under the drawing</span></label>
     </div>
 
     <!-- 5 measure -->
     <div class="pane" data-pane="measure" hidden>
-      <h2>5. Measure &amp; register</h2>
-      <p class="hint-text">Click two points for a dimension (snaps to outline corners). Then <b>drag the dimension line</b> away from the stone to keep things tidy, like in CAD. Type the <b>tape-measured value</b> to register it; it goes on the drawing with the photo value in brackets.</p>
+      <h2 data-i18n="me.h">5. Measure &amp; register</h2>
+      <p class="hint-text" data-i18n="me.p">Click two points for a dimension (snaps to outline corners). Then <b>drag the dimension line</b> away from the stone to keep things tidy, like in CAD. Type the <b>tape-measured value</b> to register it; it goes on the drawing with the photo value in brackets.</p>
       <div class="row tools">
-        <button class="tool active" data-tool="aligned" title="Distance along the two points">Aligned</button>
-        <button class="tool" data-tool="horizontal" title="Horizontal extent between the two points">Horizontal</button>
-        <button class="tool" data-tool="vertical" title="Vertical extent between the two points">Vertical</button>
+        <button class="tool active" data-tool="aligned" data-i18n="me.aligned">Aligned</button>
+        <button class="tool" data-tool="horizontal" data-i18n="me.horizontal">Horizontal</button>
+        <button class="tool" data-tool="vertical" data-i18n="me.vertical">Vertical</button>
       </div>
       <div class="row tools">
-        <button class="tool" data-tool="label">Label</button>
-        <button class="tool" data-tool="probe">Probe</button>
-        <label class="inline">Line <select id="dim-style"><option value="solid">solid</option><option value="dashed">dashed</option><option value="dotted">dotted</option></select></label>
+        <button class="tool" data-tool="label" data-i18n="me.label">Label</button>
+        <button class="tool" data-tool="probe" data-i18n="me.probe">Probe</button>
+        <label class="inline"><span data-i18n="line">Line</span> <select id="dim-style"><option value="solid" data-i18n="solid">solid</option><option value="dashed" data-i18n="dashed">dashed</option><option value="dotted" data-i18n="dotted">dotted</option></select></label>
       </div>
       <div class="row">
-        <label><input id="snap" type="checkbox" checked> Snap to outline</label>
-        <button id="btn-tidy" class="ghost" title="Spread the dimension lines out so they don't overlap">Tidy up</button>
+        <label><input id="snap" type="checkbox" checked> <span data-i18n="me.snap">Snap to outline</span></label>
+        <button id="btn-tidy" class="ghost" data-i18n="me.tidy">Tidy up</button>
       </div>
-      <table id="dim-table"><thead><tr><th>#</th><th>Label</th><th>Photo</th><th>Measured</th><th>Off.</th><th></th><th></th></tr></thead><tbody></tbody></table>
+      <table id="dim-table"><thead><tr><th>#</th><th data-i18n="label">Label</th><th data-i18n="me.photo">Photo</th><th data-i18n="me.measured">Measured</th><th data-i18n="me.off">Off.</th><th></th><th></th></tr></thead><tbody></tbody></table>
       <ul id="label-list" class="list"></ul>
     </div>
 
-    <!-- 6 export -->
+    <!-- 6 draw -->
+    <div class="pane" data-pane="draw" hidden>
+      <h2 data-i18n="dr.h">6. Finishes &amp; drawing</h2>
+      <p class="hint-text" data-i18n="dr.p">Mark hand-tooled finishes as regions: click the corners of the area on the face, then <b>Close region</b> (or double-click). It is hatched with the pattern for that finish and labelled F1, F2… Lines, arrows and leader text for anything else.</p>
+      <div class="row tools">
+        <button class="tool active" data-tool="region" data-i18n="dr.region">Finish region</button>
+        <button class="tool" data-tool="line" data-i18n="dr.line">Line</button>
+        <button class="tool" data-tool="arrow" data-i18n="dr.arrow">Arrow + text</button>
+        <button class="tool" data-tool="text" data-i18n="dr.text">Text</button>
+      </div>
+      <div id="dr-region-opts">
+        <label><span data-i18n="dr.kind">Finish</span> <select id="fin-kind"></select></label>
+        <div class="row">
+          <label><span data-i18n="dr.angle">Direction °</span> <input id="fin-angle" type="number" step="5" placeholder="auto"></label>
+          <label><span data-i18n="dr.spacing">Spacing mm</span> <input id="fin-spacing" type="number" step="0.5" placeholder="auto"></label>
+          <label><span data-i18n="dr.width">Band mm</span> <input id="fin-width" type="number" step="1" placeholder="25"></label>
+        </div>
+      </div>
+      <div id="dr-line-opts" hidden>
+        <label class="inline"><span data-i18n="line">Line</span> <select id="sk-style"><option value="solid" data-i18n="solid">solid</option><option value="dashed" data-i18n="dashed">dashed</option><option value="dotted" data-i18n="dotted">dotted</option></select></label>
+      </div>
+      <div class="row">
+        <button id="btn-dr-cancel" class="ghost" data-i18n="cancel">Cancel</button>
+        <button id="btn-dr-close" class="primary" data-i18n="dr.close">Close region / end line</button>
+      </div>
+      <table id="fin-table"><thead><tr><th>#</th><th data-i18n="dr.kind">Finish</th><th data-i18n="label">Label</th><th>°</th><th>mm</th><th></th></tr></thead><tbody></tbody></table>
+      <ul id="sketch-list" class="list"></ul>
+    </div>
+
+    <!-- 7 export -->
     <div class="pane" data-pane="export" hidden>
-      <h2>6. Export</h2>
-      <p>All exports are at <b>true scale in millimetres</b>. Y is flipped for DXF (CAD y-up).</p>
-      <label>Drawing name <input id="proj-name" type="text"></label>
-      <h3>For CAD / CAM / stone software</h3>
+      <h2 data-i18n="ex.h">7. Export</h2>
+      <p data-i18n="ex.p">All exports are at <b>true scale in millimetres</b>. Y is flipped for DXF (CAD y-up).</p>
+      <h3 data-i18n="ex.tb">Title block</h3>
+      <label><span data-i18n="ex.name">Drawing name</span> <input id="proj-name" type="text"></label>
+      <div class="row">
+        <label><span data-i18n="tb.project">Project</span> <input class="tb" data-tb="project" type="text"></label>
+        <label><span data-i18n="tb.element">Element</span> <input class="tb" data-tb="element" type="text"></label>
+      </div>
+      <div class="row">
+        <label><span data-i18n="tb.material">Stone</span> <input class="tb" data-tb="material" type="text"></label>
+        <label><span data-i18n="tb.quantity">Quantity</span> <input class="tb" data-tb="quantity" type="text"></label>
+      </div>
+      <div class="row">
+        <label><span data-i18n="tb.finish">Finish (general)</span> <input class="tb" data-tb="finish" type="text"></label>
+        <label><span data-i18n="tb.drawn_by">Drawn by</span> <input class="tb" data-tb="drawn_by" type="text"></label>
+      </div>
+      <label><span data-i18n="tb.notes">Notes</span> <input class="tb" data-tb="notes" type="text"></label>
+      <h3 data-i18n="ex.cad">For CAD / CAM / stone software</h3>
       <div class="col">
         <a class="button" id="exp-dxf" download>DXF 2010 (LWPOLYLINE, ARC, DIMENSION)</a>
-        <a class="button" id="exp-dxf12" download>DXF R12 (max. compatibility, older programs)</a>
+        <a class="button" id="exp-dxf12" download data-i18n="ex.dxf12">DXF R12 (max. compatibility, older programs)</a>
         <a class="button" id="exp-svg" download>SVG (1 unit = 1 mm)</a>
       </div>
-      <h3>For the workshop / the file</h3>
+      <h3 data-i18n="ex.shop">For the workshop / the file</h3>
       <div class="col">
-        <a class="button" id="exp-pdf" download>PDF, true scale on A4/A3 (auto)</a>
+        <a class="button" id="exp-pdf" download data-i18n="ex.pdf">PDF, true scale on A4/A3 (auto)</a>
         <div class="row"><a class="button ghost" id="exp-pdf-a4" download>PDF A4</a><a class="button ghost" id="exp-pdf-a3" download>PDF A3</a></div>
-        <a class="button" id="exp-csv" download>CSV of measurements (Excel)</a>
-        <a class="button ghost" id="exp-svg-photo" download>SVG with rectified photo embedded</a>
-        <a class="button ghost" id="exp-png" download>PNG preview</a>
-        <a class="button ghost" id="exp-json" download>Project JSON (backup)</a>
+        <a class="button" id="exp-csv" download data-i18n="ex.csv">CSV of measurements (Excel)</a>
+        <a class="button ghost" id="exp-svg-photo" download data-i18n="ex.svgphoto">SVG with rectified photo embedded</a>
+        <a class="button ghost" id="exp-png" download data-i18n="ex.png">PNG preview</a>
+        <a class="button ghost" id="exp-json" download data-i18n="ex.json">Project JSON (backup)</a>
       </div>
       <img id="export-preview" alt="">
-      <p class="muted small">Project files live in the workspace folder on this computer; nothing leaves the machine.</p>
+      <p class="muted small" data-i18n="ex.note">Project files live in the workspace folder of this server; nothing is sent anywhere else.</p>
     </div>
   </aside>
 </main>

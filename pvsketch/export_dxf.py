@@ -11,6 +11,7 @@ import ezdxf
 from ezdxf.enums import TextEntityAlignment
 
 from .geometry import Arc, Drawing, Polyline, dimension_geometry
+from .i18n import finish_name, t as tr
 
 LINETYPE = {"solid": "CONTINUOUS", "dashed": "DASHED", "dotted": "DOT"}
 
@@ -22,7 +23,8 @@ def drawing_to_dxf(dr: Drawing, path: str, with_dimensions: bool = True, version
     if version != "R12":
         doc.header["$MEASUREMENT"] = 1
     msp = doc.modelspace()
-    for name, color in (("OUTLINE", 7), ("DETAIL", 8), ("DIM", 1), ("TEXT", 5)):
+    lang = dr.lang
+    for name, color in (("OUTLINE", 7), ("DETAIL", 8), ("DIM", 1), ("TEXT", 5), ("FINISH", 8), ("FINISH_BOUNDARY", 9), ("SKETCH", 4)):
         if name not in doc.layers:
             doc.layers.add(name, color=color)
 
@@ -63,10 +65,31 @@ def drawing_to_dxf(dr: Drawing, path: str, with_dimensions: bool = True, version
     for pl in dr.detail:
         polyline([Y(p) for p in pl.points], pl.closed, "DETAIL")
 
+    # finishes: hatch as plain LINEs (every CAD/CAM reads those), boundary dashed
+    for i, f in enumerate(dr.finishes, 1):
+        fd = f.to_dict()
+        polyline([Y(p) for p in f.polygon], True, "FINISH_BOUNDARY", "DASHED")
+        for p, q in fd["hatch"]["lines"]:
+            msp.add_line(Y(p), Y(q), dxfattribs={"layer": "FINISH"})
+        for p in fd["hatch"]["dots"]:
+            msp.add_circle(Y(p), radius=max(0.2, (f.spacing_mm or 4) * 0.12), dxfattribs={"layer": "FINISH"})
+        msp.add_text(f"F{i} {f.label or finish_name(f.kind, lang)}", height=3.0, dxfattribs={"layer": "TEXT"}).set_placement(
+            Y(fd["centroid"]), align=TextEntityAlignment.MIDDLE_CENTER)
+    for sk in dr.sketches:
+        polyline([Y(p) for p in sk.points], False, "SKETCH", LINETYPE.get(sk.style, "CONTINUOUS"))
+        if sk.arrow and len(sk.points) >= 2:
+            a, b = Y(sk.points[-2]), Y(sk.points[-1])
+            ang = math.atan2(b[1] - a[1], b[0] - a[0])
+            for da in (-0.4, 0.4):
+                msp.add_line(b, (b[0] - 2.5 * math.cos(ang + da), b[1] - 2.5 * math.sin(ang + da)), dxfattribs={"layer": "SKETCH"})
+        if sk.text:
+            x, y = Y(sk.points[0])
+            msp.add_text(sk.text, height=3.0, dxfattribs={"layer": "SKETCH"}).set_placement((x + 1.5, y + 1.5))
+
     # dimensions ---------------------------------------------------------
     if with_dimensions:
         for i, d in enumerate(dr.dimensions, 1):
-            g = dimension_geometry(d)
+            g = dimension_geometry(d, lang)
             q1, q2 = Y(g["line"][0]), Y(g["line"][1])
             if math.dist(q1, q2) < 1e-6:
                 continue
@@ -107,8 +130,18 @@ def drawing_to_dxf(dr: Drawing, path: str, with_dimensions: bool = True, version
         msp.add_text(lb.text, height=3.5, dxfattribs={"layer": "TEXT"}).set_placement(
             Y(lb.pos), align=TextEntityAlignment.LEFT)
 
-    note = f"pvsketch - units mm - {dr.meta.get('calibration', '')} - {dr.meta.get('source', '')}"
+    tb = dr.titleblock or {}
+    head = str(tb.get("project") or dr.meta.get("name", ""))
+    for key in ("element", "material", "quantity", "finish", "drawn_by"):
+        if tb.get(key):
+            head += f"  {tr(lang, key)}: {tb[key]}"
+    note = f"pvsketch - {tr(lang, 'units')} - {dr.meta.get('calibration', '')} - {dr.meta.get('source', '')}"
     bbox = dr.outline_bbox()
     tx, ty = (bbox[0], H - bbox[3] - 12) if bbox else (0, -12)
+    if head.strip():
+        msp.add_text(head, height=3.5, dxfattribs={"layer": "TEXT"}).set_placement((tx, ty))
+        ty -= 6
     msp.add_text(note, height=3.0, dxfattribs={"layer": "TEXT"}).set_placement((tx, ty))
+    if tb.get("notes"):
+        msp.add_text(str(tb["notes"]), height=3.0, dxfattribs={"layer": "TEXT"}).set_placement((tx, ty - 6))
     doc.saveas(path)
