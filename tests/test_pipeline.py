@@ -155,6 +155,53 @@ class PipelineTest(unittest.TestCase):
         cl = checklist_from_template("raamdorpel")
         self.assertTrue(any(c["key"] == "lengte" for c in cl)); self.assertIn("vrij", ELEMENT_TEMPLATES)
 
+    def test_views_combined(self):
+        from pvsketch.views import combine, translate_drawing
+        main = self.project.drawing()
+        side = translate_drawing(main, 500, 300)   # pretend another photo
+        comb = combine(main, [("side", side)], "nl")
+        bb_main = main.outline_bbox(); bb = comb.outline_bbox()
+        self.assertGreater(bb[2] - bb[0], 2 * (bb_main[2] - bb_main[0]))        # two outlines side by side
+        self.assertAlmostEqual(bb[1], bb_main[1], delta=0.01)                   # tops aligned
+        self.assertTrue(any(l.text == "Zijaanzicht" for l in comb.labels))
+        self.assertIn("Zijaanzicht", drawing_to_svg(comb))
+
+    def test_lens_calibration_synthetic(self):
+        from pvsketch import lens as L
+        W, H = 1200, 900
+        K = np.array([[1100, 0, 600], [0, 1100, 450], [0, 0, 1]], float); dist = np.array([-0.22, 0.06, 0, 0, 0])
+        rng = np.random.default_rng(5); imgs = []
+        for _ in range(14):
+            rvec = np.deg2rad(rng.uniform(-18, 18, 3)); tvec = np.array([rng.uniform(-30, 30) - 112, rng.uniform(-20, 20) - 75, rng.uniform(380, 520)])
+            img = np.full((H, W, 3), 255, np.uint8)
+            for r in range(7):
+                for c in range(10):
+                    if (r + c) % 2 == 0:
+                        sq = np.float32([[c - 1, r - 1, 0], [c, r - 1, 0], [c, r, 0], [c - 1, r, 0]]) * 25
+                        pp, _ = cv2.projectPoints(sq, rvec, tvec, K, dist)
+                        cv2.fillPoly(img, [pp.reshape(-1, 2).astype(np.int32)], (0, 0, 0))
+            imgs.append(cv2.GaussianBlur(img, (3, 3), 0))
+        prof = L.calibrate_lens(imgs, name="t")
+        self.assertGreaterEqual(prof["n_images"], 6)
+        self.assertAlmostEqual(prof["dist_coeffs"][0], -0.22, delta=0.04)
+        und = L.undistort(imgs[0], prof); self.assertEqual(und.shape, imgs[0].shape)
+        root = os.path.join(self.tmp.name, "lensws"); os.makedirs(root, exist_ok=True)
+        L.save_profile(root, prof)
+        self.assertEqual(L.match_profile(root, "", "", (900, 1200)), "t")
+        self.assertTrue(L.checkerboard_pdf().startswith(b"%PDF"))
+        # applying a profile to a project resets calibration and undistorts the original
+        p = Project.from_path(self.photo, root=root)
+        p.calibrate_sheet(self.truth["a4_corners_px"], "a4")
+        self.assertIsNotNone(p.calibration)
+        with self.assertRaises(ValueError):
+            p.set_lens("nope")
+        # sample is 2100x1260: make a matching profile
+        prof2 = dict(prof); prof2["name"] = "s"; prof2["image_size"] = [2100, 1260]
+        prof2["camera_matrix"] = [[1900, 0, 1050], [0, 1900, 630], [0, 0, 1]]; prof2["dist_coeffs"] = [0, 0, 0, 0, 0]
+        L.save_profile(root, prof2)
+        self.assertEqual(p.set_lens("s"), "s"); self.assertIsNone(p.calibration)
+        self.assertEqual(p.original().shape[:2], (1260, 2100))
+
     def test_exports(self):
         self.project.set_annotations(
             [{"p1": [0, 0], "p2": [300, 0], "auto_mm": 0, "manual_mm": 301.5, "label": "W", "kind": "horizontal", "offset_mm": 15, "style": "dashed"},
@@ -239,6 +286,21 @@ class ServerTest(unittest.TestCase):
             self.assertTrue(r.get_json()["finishes"][0]["hatch"]["lines"])
             self.assertEqual(c.post("/api/projects/sample").status_code, 200)
             self.assertEqual(c.get("/api/board/a3.pdf").status_code, 200)
+            self.assertEqual(c.get("/api/checkerboard.pdf").status_code, 200)
+            self.assertEqual(c.get("/api/cameras").get_json(), [])
+            self.assertEqual(c.get("/api/ai").get_json()["smart_select"], False)
+            self.assertEqual(c.post(f"/api/projects/{pid}/smartselect", json={"fg": [[1, 1]]}).status_code, 400)
+            # views: a second project of the same photo as the "side"
+            with open(photo, "rb") as f:
+                pid2 = c.post("/api/projects", data={"photo": (f, "side.jpg")}, content_type="multipart/form-data").get_json()["id"]
+            c.post(f"/api/projects/{pid2}/calibrate", json={"mode": "quad", "sheet": "a4", "points": truth["a4_corners_px"]})
+            c.post(f"/api/projects/{pid2}/segment", json={"rect": rect}); c.post(f"/api/projects/{pid2}/outline", json={})
+            r = c.patch(f"/api/projects/{pid}", json={"views": [{"project": pid2, "name": "side"}, {"project": "bogus", "name": "x"}]})
+            self.assertEqual(len(r.get_json()["views"]), 1)
+            svg = c.get(f"/api/projects/{pid}/export.svg?lang=en").data.decode()
+            self.assertIn("Side view", svg); self.assertEqual(svg.count(" Z M "), 1)
+            svg1 = c.get(f"/api/projects/{pid}/export.svg?views=0").data.decode()
+            self.assertNotIn("Side view", svg1)
             self.assertEqual(c.get("/api/templates?lang=nl").get_json()[0]["name"], "Raamdorpel")
             r = c.put(f"/api/projects/{pid}/template", json={"template": "raamdorpel"})
             self.assertEqual(r.status_code, 200); cl = r.get_json()["checklist"]; self.assertTrue(cl)

@@ -9,7 +9,7 @@ from xml.sax.saxutils import escape
 import cv2
 import numpy as np
 
-from .geometry import Arc, Drawing, Polyline, dimension_geometry, primitive_points, sample_arc
+from .geometry import Arc, Drawing, Polyline, dimension_geometry, outline_loops, primitive_points, sample_arc
 from .i18n import finish_name, t as tr
 
 DASH = {"solid": "", "dashed": "3 1.5", "dotted": "0.6 1.2"}
@@ -20,36 +20,28 @@ def _fmt(v: float) -> str:
 
 
 def _path_outline(prims) -> str:
-    """One SVG path for the (closed) outline, arcs as elliptical-arc commands."""
-    if not prims:
-        return ""
-    d = []
-    last = None
-    for i, prim in enumerate(prims):
-        if isinstance(prim, Polyline):
-            pts = prim.points
-            if i == 0:
-                d.append(f"M {_fmt(pts[0][0])} {_fmt(pts[0][1])}")
-                last = pts[0]
-                pts = pts[1:]
-            for p in pts:
-                if last is not None and abs(p[0] - last[0]) < 1e-6 and abs(p[1] - last[1]) < 1e-6:
-                    continue
-                d.append(f"L {_fmt(p[0])} {_fmt(p[1])}")
-                last = p
-        else:
-            a: Arc = prim
-            if i == 0:
-                d.append(f"M {_fmt(a.start[0])} {_fmt(a.start[1])}")
-            large = 1 if a.sweep_deg() > 180 else 0
-            # SVG sweep-flag=1 means clockwise in screen (y-down) coordinates,
-            # which is "positive angle" in that frame; our ccw flag is also in
-            # the y-down frame, so sweep = 1 when ccw is True.
-            sweep = 1 if a.ccw else 0
-            r = _fmt(a.radius)
-            d.append(f"A {r} {r} 0 {large} {sweep} {_fmt(a.end[0])} {_fmt(a.end[1])}")
-            last = a.end
-    d.append("Z")
+    """One SVG path with a closed sub-path per loop, arcs as arc commands."""
+    d: list[str] = []
+    for loop in outline_loops(prims):
+        last = None
+        for i, prim in enumerate(loop):
+            if isinstance(prim, Polyline):
+                pts = prim.points
+                if i == 0:
+                    d.append(f"M {_fmt(pts[0][0])} {_fmt(pts[0][1])}"); last = pts[0]; pts = pts[1:]
+                for p in pts:
+                    if last is not None and abs(p[0] - last[0]) < 1e-6 and abs(p[1] - last[1]) < 1e-6:
+                        continue
+                    d.append(f"L {_fmt(p[0])} {_fmt(p[1])}"); last = p
+            else:
+                a: Arc = prim
+                if i == 0:
+                    d.append(f"M {_fmt(a.start[0])} {_fmt(a.start[1])}")
+                large = 1 if a.sweep_deg() > 180 else 0
+                sweep = 1 if a.ccw else 0
+                r = _fmt(a.radius)
+                d.append(f"A {r} {r} 0 {large} {sweep} {_fmt(a.end[0])} {_fmt(a.end[1])}"); last = a.end
+        d.append("Z")
     return " ".join(d)
 
 
@@ -201,8 +193,13 @@ def drawing_to_svg(dr: Drawing, background: np.ndarray | None = None, margin_mm:
                      f'<text x="{_fmt(x0+3)}" y="{_fmt(ty+font)}" font-weight="bold">{line1}</text>'
                      f'<text x="{_fmt(x0+3)}" y="{_fmt(ty+font*2.2)}">{line2}</text>'
                      f'<text x="{_fmt(x0+3)}" y="{_fmt(ty+font*3.4)}">{line3}</text>')
+        extra = []
+        if dr.typed_values():
+            extra.append(", ".join(f"{escape(n)} {v:.1f} mm" for n, v in dr.typed_values()))
         if tb.get("notes"):
-            parts.append(f'<text x="{_fmt(x0+3)}" y="{_fmt(ty+font*4.6)}">{tr(lang, "notes")}: {escape(tb["notes"])}</text>')
+            extra.append(f'{tr(lang, "notes")}: {escape(tb["notes"])}')
+        if extra:
+            parts.append(f'<text x="{_fmt(x0+3)}" y="{_fmt(ty+font*4.6)}">{"  -  ".join(extra)}</text>')
         bar = 100.0 if W > 160 else 50.0
         bx, by = x1 - bar - 4, ty + font * 2.2
         parts.append(f'<line x1="{_fmt(bx)}" y1="{_fmt(by)}" x2="{_fmt(bx+bar)}" y2="{_fmt(by)}" stroke="#000" stroke-width="0.8"/>'
@@ -236,12 +233,13 @@ def drawing_to_png(dr: Drawing, px_per_mm: float = 4.0, background: np.ndarray |
     for pl in dr.detail:
         pts = np.array([P(p) for p in pl.points], np.int32)
         cv2.polylines(img, [pts], False, (120, 120, 120), 1, cv2.LINE_AA)
-    outline_pts = []
-    for prim in dr.outline:
-        outline_pts.extend(primitive_points(prim))
-    if outline_pts:
-        pts = np.array([P(p) for p in outline_pts], np.int32)
-        cv2.polylines(img, [pts], True, (0, 0, 0), 2, cv2.LINE_AA)
+    for loop in outline_loops(dr.outline):
+        outline_pts = []
+        for prim in loop:
+            outline_pts.extend(primitive_points(prim))
+        if outline_pts:
+            pts = np.array([P(p) for p in outline_pts], np.int32)
+            cv2.polylines(img, [pts], True, (0, 0, 0), 2, cv2.LINE_AA)
     for f in dr.finishes:
         fd = f.to_dict()
         for p, q in fd["hatch"]["lines"]:

@@ -21,7 +21,10 @@ from typing import Any
 import cv2
 import numpy as np
 
+from . import board as board_mod
 from . import calibrate as cal_mod
+from . import lens as lens_mod
+from . import templates as tpl_mod
 from . import contour as contour_mod
 from . import segment as seg_mod
 from .geometry import Dimension, Drawing, Finish, Label, Polyline, Sketch, primitive_from_dict
@@ -94,7 +97,13 @@ class Project:
             "sketches": [],
             "titleblock": {},
             "lang": "en",
+            "template": "",
+            "checklist": [],
+            "views": [],            # [{"project": id, "name": "side"|"top"|"profile"|free text}]
+            "lens": "",             # camera profile name applied to the original (undistort)
+            "exif": {},
         }
+        self.root = root
         self._cache: dict[str, Any] = {}
 
     # ---------------------------------------------------------- persistence
@@ -117,6 +126,7 @@ class Project:
         p = cls(pid, root)
         with open(p.json_path, encoding="utf-8") as f:
             p.state.update(json.load(f))
+        p.root = root
         return p
 
     @classmethod
@@ -141,6 +151,12 @@ class Project:
         if img2 is not None:
             img = img2
         p.state["original"] = orig
+        make, model = lens_mod.exif_make_model(image_bytes)
+        p.state["exif"] = {"make": make, "model": model}
+        auto = lens_mod.match_profile(root, make, model, (int(img.shape[1]), int(img.shape[0])))
+        if auto:
+            p.state["lens"] = auto
+            p._cache.pop("original", None)
         p.state["name"] = _safe_name(os.path.splitext(filename)[0])
         p.state["image_size"] = [int(img.shape[1]), int(img.shape[0])]
         p._cache["original"] = img
@@ -173,12 +189,38 @@ class Project:
 
     # ----------------------------------------------------------------- images
     def original(self) -> np.ndarray:
+        """The photo as the pipeline sees it: undistorted when a lens profile is set."""
         if "original" not in self._cache:
             img = cv2.imread(os.path.join(self.dir, self.state["original"]), cv2.IMREAD_COLOR)
             if img is None:
                 raise FileNotFoundError("original image missing")
+            name = self.state.get("lens") or ""
+            if name:
+                prof = lens_mod.load_profile(self.root, name)
+                if prof:
+                    try:
+                        img = lens_mod.undistort(img, prof)
+                    except ValueError:
+                        pass
             self._cache["original"] = img
         return self._cache["original"]
+
+    def set_lens(self, name: str | None) -> str:
+        """'' = none, 'auto' = match by EXIF/size, else a profile name. Resets calibration."""
+        if name == "auto":
+            ex = self.state.get("exif") or {}
+            w, h = self.state.get("image_size") or (0, 0)
+            name = lens_mod.match_profile(self.root, ex.get("make", ""), ex.get("model", ""), (w, h)) or ""
+        name = name or ""
+        if name and not lens_mod.load_profile(self.root, name):
+            raise ValueError("unknown lens profile")
+        if name != (self.state.get("lens") or ""):
+            self.state["lens"] = name
+            self._cache.pop("original", None)
+            self._invalidate_from("calibration")
+            self.state["dimensions"] = []
+        self.save()
+        return name
 
     def rectified(self) -> np.ndarray:
         if "rectified" not in self._cache:
@@ -248,6 +290,11 @@ class Project:
 
     def calibrate_aruco(self, marker_size_mm: float, marker_id: int | None = None, ppm: float | None = None) -> cal_mod.Calibration:
         cal = cal_mod.calibrate_aruco(self.original(), marker_size_mm, marker_id, ppm=ppm)
+        self.set_calibration(cal)
+        return cal
+
+    def calibrate_board(self, board: str = "a3", ppm: float | None = None) -> cal_mod.Calibration:
+        cal, _ids = board_mod.calibrate_board(self.original(), board, ppm=ppm)
         self.set_calibration(cal)
         return cal
 
@@ -335,9 +382,24 @@ class Project:
         self.state["titleblock"] = tb
         self.save()
 
+    def set_template(self, key: str, keep_values: bool = True) -> list[dict[str, Any]]:
+        """Switch the element template; the checklist is rebuilt, keeping values
+        of items whose key still exists."""
+        old = {c["key"]: c for c in self.state.get("checklist") or []}
+        new = tpl_mod.checklist_from_template(key)
+        if keep_values:
+            for c in new:
+                if c["key"] in old:
+                    c["value_mm"] = old[c["key"]].get("value_mm"); c["dim_id"] = old[c["key"]].get("dim_id", "")
+        self.state["template"] = key if key in tpl_mod.ELEMENT_TEMPLATES else ""
+        self.state["checklist"] = new
+        self.save()
+        return new
+
     def set_annotations(self, dimensions: list[dict[str, Any]], labels: list[dict[str, Any]],
                         finishes: list[dict[str, Any]] | None = None,
-                        sketches: list[dict[str, Any]] | None = None) -> None:
+                        sketches: list[dict[str, Any]] | None = None,
+                        checklist: list[dict[str, Any]] | None = None) -> None:
         cal = self.calibration
         dims = []
         for i, d in enumerate(dimensions):
@@ -363,6 +425,17 @@ class Project:
                 d = asdict_finish(fin)
                 fins.append(d)
             self.state["finishes"] = fins
+        if checklist is not None:
+            cl = []
+            for c in checklist:
+                if not isinstance(c, dict) or not c.get("key"):
+                    continue
+                v = c.get("value_mm")
+                cl.append({"key": str(c["key"])[:40], "nl": str(c.get("nl", ""))[:80], "en": str(c.get("en", ""))[:80],
+                           "kind": c.get("kind") if c.get("kind") in ("horizontal", "vertical", "aligned", "value") else "value",
+                           "hint": str(c.get("hint", ""))[:120],
+                           "value_mm": (None if v in (None, "") else float(v)), "dim_id": str(c.get("dim_id", ""))[:8]})
+            self.state["checklist"] = cl
         if sketches is not None:
             sks = []
             for i, sk in enumerate(sketches):
@@ -373,6 +446,36 @@ class Project:
                 sks.append(ske.to_dict())
             self.state["sketches"] = sks
         self.save()
+
+    # ------------------------------------------------------------------ views
+    def set_views(self, views: list[dict[str, Any]], root: str) -> list[dict[str, Any]]:
+        out = []
+        for v in views[:6]:
+            vid = str(v.get("project", ""))
+            if vid == self.id:
+                continue
+            try:
+                Project.load(vid, root)
+            except (FileNotFoundError, ValueError):
+                continue
+            out.append({"project": vid, "name": str(v.get("name") or "side")[:40]})
+        self.state["views"] = out
+        self.save()
+        return out
+
+    def combined_drawing(self, root: str) -> Drawing:
+        """This project's drawing plus its linked views on one sheet."""
+        from .views import combine
+        main = self.drawing()
+        views = []
+        for v in self.state.get("views") or []:
+            try:
+                p = Project.load(v["project"], root)
+                if p.calibration and p.state.get("outline"):
+                    views.append((v.get("name", "side"), p.drawing()))
+            except (FileNotFoundError, ValueError, RuntimeError):
+                continue
+        return combine(main, views, main.lang)
 
     # ---------------------------------------------------------------- drawing
     def drawing(self) -> Drawing:
@@ -387,6 +490,7 @@ class Project:
         dr.finishes = [Finish.from_dict(f) for f in self.state.get("finishes", []) or []]
         dr.sketches = [Sketch.from_dict(s) for s in self.state.get("sketches", []) or []]
         dr.titleblock = dict(self.state.get("titleblock") or {})
+        dr.checklist = [dict(c) for c in self.state.get("checklist") or []]
         dr.meta = {"name": self.state.get("name", ""), "source": self.state.get("original", ""),
                    "calibration": cal.note, "ppm": cal.ppm, "project": self.id,
                    "lang": self.state.get("lang", "en")}

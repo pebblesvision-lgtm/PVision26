@@ -237,6 +237,15 @@ class Drawing:
     sketches: list[Sketch] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
     titleblock: dict[str, str] = field(default_factory=dict)
+    checklist: list[dict[str, Any]] = field(default_factory=list)   # template items (typed values + links to dims)
+
+    def typed_values(self) -> list[tuple[str, float]]:
+        """Checklist items that carry a typed value but no dimension line."""
+        out = []
+        for c in self.checklist:
+            if c.get("value_mm") is not None and not c.get("dim_id"):
+                out.append((c.get(self.lang) or c.get("en") or c.get("key", ""), float(c["value_mm"])))
+        return out
 
     @property
     def lang(self) -> str:
@@ -264,8 +273,31 @@ class Drawing:
             "sketches": [s.to_dict() for s in self.sketches],
             "meta": self.meta,
             "titleblock": self.titleblock,
+            "checklist": self.checklist,
             "bbox": self.outline_bbox(),
         }
+
+
+def _start(prim: "Primitive") -> Point:
+    return prim.points[0] if isinstance(prim, Polyline) else prim.start
+
+
+def _end(prim: "Primitive") -> Point:
+    return prim.points[-1] if isinstance(prim, Polyline) else prim.end
+
+
+def outline_loops(prims: list["Primitive"], tol: float = 1e-6) -> list[list["Primitive"]]:
+    """Split a flat primitive list into closed loops wherever consecutive
+    primitives don't connect (several views or islands on one sheet)."""
+    loops: list[list[Primitive]] = []
+    cur: list[Primitive] = []
+    for prim in prims:
+        if cur and (isinstance(cur[-1], Polyline) and cur[-1].closed or math.dist(_end(cur[-1]), _start(prim)) > tol):
+            loops.append(cur); cur = []
+        cur.append(prim)
+    if cur:
+        loops.append(cur)
+    return loops
 
 
 def primitive_points(prim: Primitive, arc_step_deg: float = 5.0) -> list[Point]:

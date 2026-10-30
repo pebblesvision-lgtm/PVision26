@@ -35,6 +35,18 @@ def cmd_marker(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_models(a: argparse.Namespace) -> int:
+    from .segment_ai import DECODER, ENCODER, available, models_dir
+    d = models_dir(a.workspace)
+    print(f"model folder: {d}")
+    print(f"smart select available: {available(a.workspace)}")
+    print("To enable it, download the MobileSAM ONNX files (github.com/ChaoningZhang/MobileSAM, 'ONNX' section) and save them as:")
+    print(f"  {os.path.join(d, ENCODER)}")
+    print(f"  {os.path.join(d, DECODER)}")
+    print("and install the runtime:  pip install onnxruntime")
+    return 0
+
+
 def cmd_board(a: argparse.Namespace) -> int:
     from .board import board_pdf
     with open(a.out, "wb") as f:
@@ -117,6 +129,9 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("--id", type=int, default=0); m.add_argument("--size", type=float, default=100.0, help="mm")
     m.add_argument("--dpi", type=int, default=300); m.add_argument("--out", default="pvsketch-marker.png")
     m.set_defaults(fn=cmd_marker)
+
+    mo = sub.add_parser("models", help="show where to put the optional smart-select model files")
+    mo.set_defaults(fn=cmd_models)
 
     bd = sub.add_parser("board", help="write the printable A3/A4 marker board (PDF, true scale)")
     bd.add_argument("--paper", default="a3", choices=["a3", "a4"]); bd.add_argument("--out", default="pvsketch-board-a3.pdf")

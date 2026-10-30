@@ -44,6 +44,15 @@
     "Sample loaded: click the 4 corners of the white A4 sheet": "Voorbeeld geladen: klik de 4 hoeken van het witte A4-vel", "No projects yet": "Nog geen projecten",
     "outlined": "omtrek", "isolated": "geïsoleerd", "calibrated": "gekalibreerd", "photo": "foto", "dims": "maten",
     "Text": "Tekst", "A region needs at least 3 points": "Een vlak heeft minstens 3 punten nodig", "auto": "auto",
+    "cal.board3": "A3 markerbord (automatisch, beste)", "cal.board4": "A4 markerbord (automatisch)", "cal.aruco": "Losse ArUco-marker (automatisch)",
+    "photo.marker": "Beste referentie: het <a href=\"/api/board/a3.pdf\">A3-markerbord</a> (of <a href=\"/api/board/a4.pdf\">A4</a>). Print op 100%, controleer de 100 mm-balk met een duimstok, plak het vlak op foamboard. Leg het op het steenvlak; het wordt automatisch herkend. Een losse <a href=\"/api/marker/0.png?size_mm=100\">marker van 100 mm</a> of een A4-vel werkt ook.",
+    "Lay the whole marker board flat on the stone face, in focus. Press Calibrate: the markers are found automatically.": "Leg het hele markerbord plat op het steenvlak, scherp in beeld. Druk op <b>Kalibreren</b>: de markers worden automatisch gevonden.",
+    "lens.h": "Cameralensprofiel (haalt tonvormige vertekening weg)", "lens.p": "Telefoonlenzen buigen rechte randen aan de rand van het beeld. Print het <a href=\"/api/checkerboard.pdf\">schaakbord</a>, fotografeer het 8-12 keer vanuit verschillende hoeken en afstanden met de lens die u voor steenfoto's gebruikt (nooit de 0,5x groothoek), upload ze hier. Het profiel wordt automatisch toegepast op latere foto's van dezelfde camera.", "lens.name": "Profielnaam", "lens.create": "Profiel maken", "lens.use": "Lensprofiel voor deze foto",
+    "profile created": "profiel gemaakt", "images used": "foto's gebruikt", "reprojection error": "herprojectiefout", "Lens profile applied; calibrate again.": "Lensprofiel toegepast; kalibreer opnieuw.",
+    "ex.views": "Andere aanzichten van dit element op hetzelfde blad", "ex.viewsp": "Een zijaanzicht, profiel of bovenaanzicht is een ander project (een andere foto van hetzelfde element). Koppel het hier; het wordt naast dit aanzicht getekend, bovenkanten gelijk, met hetzelfde titelblok.",
+    "view.side": "Zijaanzicht", "view.profile": "Profiel", "view.top": "Bovenaanzicht", "view.back": "Achteraanzicht", "add": "Toevoegen",
+    "iso.smart": "Slim selecteren (AI)", "iso.smartp": "Klik op de steen (links) en op de achtergrond (Alt+klik), dan Uitvoeren. Het model zoekt de rand; GrabCut wordt niet gebruikt.",
+    "me.template": "Elementsjabloon (checklist van verplichte maten)", "me.item": "Maat", "me.value": "mm", "Measure": "Meten", "Now measure": "Meet nu", "type the value": "typ de waarde", "not on photo": "niet op de foto",
   };
   let LANG = (() => { try { return localStorage.getItem("pvsketch.lang") || (navigator.language || "").toLowerCase().startsWith("nl") ? "nl" : "en"; } catch (_) { return "en"; } })();
   const t = (s) => (LANG === "nl" && NL[s]) ? NL[s] : s;
@@ -66,10 +75,12 @@
     outlineTool: "view", edit: { drag: null, sel: null },
     measure: { tool: "aligned", pending: null, hover: null, hl: null, dragDim: null },
     draw: { tool: "region", pts: [], hover: null },
-    finishKinds: [],
+    finishKinds: [], templates: [], armed: null,
     showPhoto: true, panning: null,
   };
-  const newSeg = () => ({ rect: null, polygon: [], strokes: [], tool: "points", drag: null, dragStart: null, stroke: null, dragPoint: null });
+  const newSeg = () => ({ rect: null, polygon: [], strokes: [], tool: "points", drag: null, dragStart: null, stroke: null, dragPoint: null, smartFg: [], smartBg: [] });
+  let AI = false;
+  (async () => { try { AI = !!(await api("/api/ai")).smart_select; $("#tool-smart").hidden = !AI; } catch (_) { AI = false; } })();
   S.seg = newSeg();
   const canvas = $("#canvas");
   const ctx = canvas.getContext("2d");
@@ -83,11 +94,11 @@
     redo() { if (!this.future.length) return false; this.past.push(JSON.stringify(this.get())); this.set(JSON.parse(this.future.pop())); updateUndoButtons(); return true; }
     clear() { this.past = []; this.future = []; updateUndoButtons(); }
   }
-  const segHist = new History(() => ({ rect: S.seg.rect, polygon: S.seg.polygon, strokes: S.seg.strokes }),
+  const segHist = new History(() => ({ rect: S.seg.rect, polygon: S.seg.polygon, strokes: S.seg.strokes, smartFg: S.seg.smartFg, smartBg: S.seg.smartBg }),
     (v) => { Object.assign(S.seg, v, { drag: null, stroke: null, dragPoint: null }); draw(); });
   const outlineHist = new History(() => S.drawing ? S.drawing.outline : [],
     (v) => { if (S.drawing) { S.drawing.outline = v; saveOutline(); draw(); } });
-  const annGet = () => S.drawing ? { dimensions: S.drawing.dimensions, labels: S.drawing.labels, finishes: S.drawing.finishes, sketches: S.drawing.sketches } : { dimensions: [], labels: [], finishes: [], sketches: [] };
+  const annGet = () => S.drawing ? { dimensions: S.drawing.dimensions, labels: S.drawing.labels, finishes: S.drawing.finishes, sketches: S.drawing.sketches, checklist: S.drawing.checklist || [] } : { dimensions: [], labels: [], finishes: [], sketches: [], checklist: [] };
   const annHist = new History(annGet, (v) => { if (S.drawing) { Object.assign(S.drawing, v); saveAnnotations(); renderDimTable(); renderDrawTables(); draw(); } });
   const activeHist = () => ({ isolate: segHist, outline: outlineHist, measure: annHist, draw: annHist })[S.step] || null;
   function updateUndoButtons() {
@@ -261,6 +272,8 @@
       }
       poly.forEach((p, i) => dot(p, i === 0 ? "#fff" : "#f2a93b", undefined, 5));
     }
+    (g.smartFg || []).forEach((p) => dot(p, "#4fd18b", undefined, 5));
+    (g.smartBg || []).forEach((p) => dot(p, "#ff6b6b", undefined, 5));
     if (["fg", "bg", "erase"].includes(g.tool) && g.cursor) {
       const [x, y] = toScreen(...g.cursor);
       ctx.beginPath(); ctx.arc(x, y, (+$("#brush-size").value) * S.view.scale, 0, Math.PI * 2);
@@ -276,11 +289,14 @@
   }
   function traceOutline(outline) {
     ctx.beginPath();
-    let first = true;
+    let first = true, last = null;
+    const pStart = (pr) => pr.type === "polyline" ? pr.points[0] : pr.start, pEnd = (pr) => pr.type === "polyline" ? pr.points[pr.points.length - 1] : pr.end;
     for (const prim of outline) {
+      if (!first && last && dist(last, pStart(prim)) > 1e-6) { ctx.closePath(); first = true; }  // next loop (another view)
       if (prim.type === "polyline") prim.points.forEach((p, i) => { const [x, y] = mmToScreen(p); (first && i === 0) ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
       else { if (first) { const [x, y] = mmToScreen(prim.start); ctx.moveTo(x, y); } pathArc(prim); }
-      first = false;
+      first = false; last = prim.type === "polyline" && prim.closed ? null : pEnd(prim);
+      if (prim.type === "polyline" && prim.closed) { ctx.closePath(); first = true; }
     }
     ctx.closePath();
   }
@@ -434,13 +450,13 @@
     const hint = $("#viewer-hint");
     S.measure.pending = null; S.measure.hover = null; S.edit = { drag: null, sel: null }; S.draw.pts = []; S.draw.hover = null;
     try {
-      if (step === "photo") { hint.textContent = ""; if (S.project) await showImage("original"); await refreshProjects(); }
-      if (step === "calibrate") { hint.textContent = t("Click reference corners · wheel = zoom · right-drag = pan"); await showImage("original"); }
+      if (step === "photo") { hint.textContent = ""; if (S.project) await showImage("original"); await refreshProjects(); refreshLenses(); }
+      if (step === "calibrate") { hint.textContent = t("Click reference corners · wheel = zoom · right-drag = pan"); await showImage("original"); refreshLenses(); }
       if (step === "isolate") { hint.textContent = t("Click points along the outer line (or drag a box), then Run · right-drag = pan · Ctrl+Z undo"); await showImage(S.project.segmentation ? "overlay" : "rectified"); }
       if (step === "outline") { hint.textContent = ""; await showImage("rectified"); await loadDrawing(); if (!S.project.outline) await runOutline(); }
-      if (step === "measure") { hint.textContent = t("Click 2 points for a dimension · drag a dimension line to move it · right-drag = pan"); await showImage("rectified"); await loadDrawing(); renderDimTable(); }
+      if (step === "measure") { hint.textContent = t("Click 2 points for a dimension · drag a dimension line to move it · right-drag = pan"); await showImage("rectified"); await loadDrawing(); await ensureTemplates(); renderDimTable(); renderChecklist(); }
       if (step === "draw") { hint.textContent = t("Click the corners of the area, then Close region (or double-click) · right-drag = pan"); await showImage("rectified"); await loadDrawing(); await ensureFinishKinds(); renderDrawTables(); }
-      if (step === "export") { hint.textContent = ""; await showImage("rectified"); await loadDrawing(); setupExport(); }
+      if (step === "export") { hint.textContent = ""; await showImage("rectified"); await loadDrawing(); setupExport(); await renderViews(); }
     } catch (e) { toast(e.message, true); }
     updateUndoButtons();
     draw();
@@ -463,7 +479,7 @@
     S.project = await api(`/api/projects/${id}`);
     S.calPoints = []; S.seg = newSeg(); S.drawing = null;
     segHist.clear(); outlineHist.clear(); annHist.clear();
-    if (S.project.calibration && S.project.calibration.mode !== "aruco") S.calPoints = S.project.calibration.ref_points_px.map((p) => [...p]);
+    if (S.project.calibration && !["aruco", "board"].includes(S.project.calibration.mode)) S.calPoints = S.project.calibration.ref_points_px.map((p) => [...p]);
     const sg = S.project.segmentation;
     if (sg) {
       S.seg.rect = sg.rect ? [...sg.rect] : null;
@@ -508,10 +524,49 @@
   document.addEventListener("dragover", (e) => e.preventDefault());
   document.addEventListener("drop", (e) => { e.preventDefault(); if (e.dataTransfer.files[0] && S.step === "photo") upload(e.dataTransfer.files[0]); });
 
+  // -------------------------------------------------------------- lens ----
+  async function refreshLenses() {
+    let list = [];
+    try { list = await api("/api/cameras"); } catch (_) { return; }
+    const ul = $("#lens-list"); ul.innerHTML = "";
+    for (const c of list) {
+      const li = document.createElement("li");
+      const sp = document.createElement("span"); sp.style.flex = "1"; sp.textContent = `${c.name}  ${c.make || ""} ${c.model || ""}  ${c.image_size ? c.image_size.join("x") : ""}  rms ${fmt(c.rms_px, 2)} px (${c.n_images})`;
+      const x = document.createElement("span"); x.className = "x"; x.textContent = "✕"; x.onclick = async () => { await api(`/api/cameras/${encodeURIComponent(c.name)}`, { method: "DELETE" }); refreshLenses(); };
+      li.append(sp, x); ul.append(li);
+    }
+    const sel = $("#lens-select"); const cur = S.project ? (S.project.lens || "") : "";
+    sel.innerHTML = '<option value="">–</option><option value="auto">auto</option>';
+    for (const c of list) { const o = document.createElement("option"); o.value = c.name; o.textContent = c.name; sel.append(o); }
+    sel.value = cur;
+  }
+  $("#btn-lens-create").onclick = async () => {
+    const files = $("#lens-files").files;
+    if (files.length < 4) { toast(t("upload at least 4 checkerboard photos (8-12 is better)"), true); return; }
+    const fd = new FormData(); fd.append("name", $("#lens-name").value);
+    for (const f of files) fd.append("photos", f, f.name);
+    const btn = $("#btn-lens-create"); busy(btn, true);
+    try {
+      const prof = await api("/api/cameras", { method: "POST", body: fd });
+      $("#lens-result").className = "result ok"; $("#lens-result").textContent = `${t("profile created")}: ${prof.name}, ${prof.n_images} ${t("images used")}, ${t("reprojection error")} ${fmt(prof.rms_px, 2)} px`;
+      refreshLenses();
+    } catch (e) { $("#lens-result").className = "result err"; $("#lens-result").textContent = e.message; }
+    busy(btn, false);
+  };
+  $("#lens-select").onchange = async (e) => {
+    if (!S.project) return;
+    try {
+      S.project = await patch(`/api/projects/${pid()}`, { lens: e.target.value });
+      e.target.value = S.project.lens || ""; S.calPoints = []; S.seg = newSeg(); S.drawing = null;
+      await showImage("original"); updateStepButtons(); toast(t("Lens profile applied; calibrate again."));
+    } catch (err) { toast(err.message, true); }
+  };
+
   // ---------------------------------------------------------- language ----
   $("#lang").onchange = async (e) => {
     LANG = e.target.value; try { localStorage.setItem("pvsketch.lang", LANG); } catch (_) { /* private mode */ }
     applyI18n(); calInstructions(); renderDimTable(); renderDrawTables(); populateFinishKinds(); updateStepButtons(); draw();
+    if (S.project && S.step === "measure") { await ensureTemplates(); renderChecklist(); }
     if (S.step === "export") setupExport();
     if (S.project) { try { S.project = await patch(`/api/projects/${pid()}`, { lang: LANG }); } catch (_) { /* offline edit */ } }
   };
@@ -521,10 +576,11 @@
   function calInstructions() {
     const m = calMode();
     $("#cal-custom").hidden = m !== "custom"; $("#cal-aruco").hidden = m !== "aruco"; $("#cal-two").hidden = m !== "two_point";
-    const en = m === "aruco" ? "Lay the printed marker flat on the stone face. Press Detect, then Calibrate."
+    const en = m.startsWith("board") ? "Lay the whole marker board flat on the stone face, in focus. Press Calibrate: the markers are found automatically."
+      : m === "aruco" ? "Lay the printed marker flat on the stone face. Press Detect, then Calibrate."
       : m === "two_point" ? "Click 2 points with a known distance between them (e.g. the ends of a ruler). No perspective correction: only use when the camera was square to the face."
       : "Click the 4 corners of the sheet in the photo (any order). Zoom with the wheel for precision; drag with the right mouse button to pan.";
-    const enHtml = m === "aruco" ? en.replace("Detect", "<b>Detect</b>").replace("Calibrate", "<b>Calibrate</b>") : m === "two_point" ? en.replace("2 points", "<b>2 points</b>") : en.replace("4 corners", "<b>4 corners</b>");
+    const enHtml = m.startsWith("board") ? en.replace("Calibrate", "<b>Calibrate</b>") : m === "aruco" ? en.replace("Detect", "<b>Detect</b>").replace("Calibrate", "<b>Calibrate</b>") : m === "two_point" ? en.replace("2 points", "<b>2 points</b>") : en.replace("4 corners", "<b>4 corners</b>");
     $("#cal-instructions").innerHTML = LANG === "nl" ? NL[en] : enHtml;
   }
   $("#cal-mode").onchange = () => { calInstructions(); S.calPoints = []; draw(); };
@@ -538,7 +594,8 @@
   };
   $("#btn-calibrate").onclick = async () => {
     const m = calMode();
-    const body = { mode: m === "aruco" ? "aruco" : m === "two_point" ? "two_point" : "quad", points: S.calPoints };
+    const body = { mode: m.startsWith("board") ? "board" : m === "aruco" ? "aruco" : m === "two_point" ? "two_point" : "quad", points: S.calPoints };
+    if (m.startsWith("board")) body.board = m.slice(6);
     const ppmIn = $("#cal-ppm").value; if (ppmIn) body.ppm = +ppmIn;
     if (m === "custom") { body.sheet = "custom"; body.width_mm = +$("#cal-w").value; body.height_mm = +$("#cal-h").value; }
     else if (m === "aruco") body.marker_mm = +$("#cal-marker-mm").value;
@@ -557,15 +614,26 @@
   };
 
   // ------------------------------------------------------- segmentation ----
-  function setSegTool(tool) { S.seg.tool = tool; $$('[data-pane="isolate"] .tool').forEach((x) => x.classList.toggle("active", x.dataset.tool === tool)); draw(); }
+  function setSegTool(tool) { S.seg.tool = tool; $$('[data-pane="isolate"] .tool').forEach((x) => x.classList.toggle("active", x.dataset.tool === tool)); $("#smart-help").hidden = tool !== "smart"; draw(); }
   $$('[data-pane="isolate"] .tool').forEach((b) => b.onclick = () => setSegTool(b.dataset.tool));
   $("#brush-size").oninput = (e) => { $("#brush-size-v").textContent = e.target.value; draw(); };
   $("#band-mm").oninput = (e) => { $("#band-mm-v").textContent = e.target.value; draw(); };
   $("#seg-exact").onchange = draw;
   $("#btn-seg-clear").onclick = () => { if (!S.seg.strokes.length) return; segHist.snap(); S.seg.strokes = []; draw(); };
-  $("#btn-seg-clear-points").onclick = () => { if (!S.seg.polygon.length) return; segHist.snap(); S.seg.polygon = []; draw(); };
+  $("#btn-seg-clear-points").onclick = () => { if (!S.seg.polygon.length && !S.seg.smartFg.length && !S.seg.smartBg.length) return; segHist.snap(); S.seg.polygon = []; S.seg.smartFg = []; S.seg.smartBg = []; draw(); };
   $("#btn-segment").onclick = async () => {
     const g = S.seg, exact = $("#seg-exact").checked;
+    if (g.tool === "smart") {
+      if (!g.smartFg.length) { toast(t("Click at least 3 points along the stone or drag a box first"), true); return; }
+      const btn = $("#btn-segment"); busy(btn, true);
+      try {
+        const r = await post(`/api/projects/${pid()}/smartselect`, { fg: g.smartFg, bg: g.smartBg, box: g.rect });
+        S.project = r.state; S.drawing = null; outlineHist.clear();
+        $("#seg-result").className = "result ok"; $("#seg-result").textContent = `${t("stone area")} ≈ ${fmt(r.mask_px / (ppm() * ppm()) / 100, 0)} cm². ${t("Check the red boundary. Wrong somewhere? Add points or brush there and Run again, then go to 4.")}`;
+        await showImage("overlay"); updateStepButtons();
+      } catch (e) { $("#seg-result").className = "result err"; $("#seg-result").textContent = e.message; }
+      busy(btn, false); return;
+    }
     if (g.polygon.length < 3 && !g.rect) { toast(t("Click at least 3 points along the stone or drag a box first"), true); return; }
     if (exact && g.polygon.length < 3) { toast(t("'Use points exactly' needs at least 3 points"), true); return; }
     const btn = $("#btn-segment"); busy(btn, true);
@@ -701,8 +769,8 @@
     saveT = setTimeout(async () => {
       try {
         S.drawing = await put(`/api/projects/${pid()}/annotations`, annGet());
-        S.project.dimensions = S.drawing.dimensions; S.project.labels = S.drawing.labels; S.project.finishes = S.drawing.finishes; S.project.sketches = S.drawing.sketches;
-        updateStepButtons(); renderDimTable(); renderDrawTables(); draw();
+        S.project.dimensions = S.drawing.dimensions; S.project.labels = S.drawing.labels; S.project.finishes = S.drawing.finishes; S.project.sketches = S.drawing.sketches; S.project.checklist = S.drawing.checklist;
+        updateStepButtons(); renderDimTable(); renderChecklist(); renderDrawTables(); draw();
       } catch (e) { toast(e.message, true); }
     }, 250);
   }
@@ -724,7 +792,7 @@
       tr.querySelector(".manual").onchange = (e) => { annHist.snap(); dim.manual_mm = e.target.value === "" ? null : +e.target.value; saveAnnotations(); };
       tr.querySelector(".off").onchange = (e) => { annHist.snap(); dim.offset_mm = +e.target.value || 0; saveAnnotations(); };
       tr.querySelector(".sty").onchange = (e) => { annHist.snap(); dim.style = e.target.value; saveAnnotations(); };
-      tr.querySelector(".x").onclick = () => { annHist.snap(); d.dimensions.splice(i, 1); saveAnnotations(); };
+      tr.querySelector(".x").onclick = () => { annHist.snap(); d.dimensions.splice(i, 1); relinkChecklist(i); saveAnnotations(); };
       tr.onmouseenter = () => { S.measure.hl = i; draw(); }; tr.onmouseleave = () => { S.measure.hl = null; draw(); };
       tb.append(tr);
     });
@@ -736,6 +804,50 @@
       li.append(inp, x); ul.append(li);
     });
   }
+  // ---- element templates / checklist
+  async function ensureTemplates() {
+    if (!S.templates.length || S.templates._lang !== LANG) { S.templates = await api(`/api/templates?lang=${LANG}`); S.templates._lang = LANG; }
+    const sel = $("#tpl-select"); sel.innerHTML = '<option value="">–</option>';
+    for (const tp of S.templates) { const o = document.createElement("option"); o.value = tp.key; o.textContent = tp.name; sel.append(o); }
+    sel.value = S.project.template || "";
+  }
+  $("#tpl-select").onchange = async (e) => {
+    try {
+      const r = await put(`/api/projects/${pid()}/template`, { template: e.target.value });
+      S.project.template = r.template; S.project.checklist = r.checklist; if (S.drawing) S.drawing.checklist = r.checklist;
+      S.armed = null; renderChecklist();
+    } catch (err) { toast(err.message, true); }
+  };
+  function relinkChecklist(deletedIdx) {
+    for (const c of (S.drawing.checklist || [])) {
+      if (!c.dim_id) continue;
+      const n = parseInt(c.dim_id.slice(1), 10) - 1;
+      if (n === deletedIdx) c.dim_id = ""; else if (n > deletedIdx) c.dim_id = `D${n}`;
+    }
+  }
+  function renderChecklist() {
+    const tbl = $("#checklist"); const tb = tbl.querySelector("tbody"); tb.innerHTML = "";
+    const cl = (S.drawing && S.drawing.checklist) || [];
+    tbl.hidden = !cl.length;
+    cl.forEach((c, i) => {
+      const tr = document.createElement("tr");
+      const dim = c.dim_id ? (S.drawing.dimensions || [])[parseInt(c.dim_id.slice(1), 10) - 1] : null;
+      const done = !!dim || c.value_mm != null;
+      tr.className = (done ? "done " : "") + (S.armed === i ? "armed" : "");
+      const name = LANG === "nl" ? c.nl : c.en;
+      const kindTxt = c.kind === "value" ? t("type the value") : c.kind;
+      tr.innerHTML = `<td>${name}<div class="hint">${c.hint || ""} ${c.kind === "value" ? "· " + t("not on photo") : ""}</div></td>
+        <td>${dim ? `<b>${fmt(dimValue(dim))}</b> <span class="muted">${c.dim_id}</span>` : `<input type="number" step="0.5" value="${c.value_mm ?? ""}" placeholder="${kindTxt}">`}</td>
+        <td>${c.kind !== "value" && !dim ? `<button class="ghost arm">${t("Measure")}</button>` : ""}</td>`;
+      const inp = tr.querySelector("input");
+      if (inp) inp.onchange = () => { annHist.snap(); c.value_mm = inp.value === "" ? null : +inp.value; saveAnnotations(); };
+      const arm = tr.querySelector(".arm");
+      if (arm) arm.onclick = () => { S.armed = S.armed === i ? null : i; S.measure.tool = c.kind; $$('[data-pane="measure"] .tool').forEach((x) => x.classList.toggle("active", x.dataset.tool === c.kind)); S.measure.pending = null;
+        $("#viewer-hint").textContent = S.armed === i ? `${t("Now measure")}: ${name}` : t("Click 2 points for a dimension · drag a dimension line to move it · right-drag = pan"); renderChecklist(); draw(); };
+      tb.append(tr);
+    });
+  }
+
   $("#btn-tidy").onclick = () => {
     const d = S.drawing; if (!d || !d.dimensions.length) return;
     annHist.snap();
@@ -831,6 +943,26 @@
     $("#exp-csv").href = `${base}.csv?${L}`; $("#exp-png").href = `${base}.png?photo=1&${L}`; $("#exp-json").href = `${base}.json`;
     $("#export-preview").src = `/api/projects/${pid()}/image/preview?t=${Date.now()}`;
   }
+  async function renderViews() {
+    const list = await api("/api/projects");
+    const sel = $("#view-project"); sel.innerHTML = "";
+    for (const p of list) { if (p.id === pid() || !p.outlined) continue; const o = document.createElement("option"); o.value = p.id; o.textContent = `${p.name} (${p.id.slice(0, 15)})`; sel.append(o); }
+    const ul = $("#view-list"); ul.innerHTML = "";
+    (S.project.views || []).forEach((v, i) => {
+      const li = document.createElement("li");
+      const sp = document.createElement("span"); sp.style.flex = "1"; const pr = list.find((p) => p.id === v.project);
+      sp.textContent = `${t({ side: "view.side", profile: "view.profile", top: "view.top", back: "view.back" }[v.name] ? ({ side: "Side view", profile: "Profile", top: "Top view", back: "Back view" })[v.name] : v.name)}: ${pr ? pr.name : v.project}`;
+      if (LANG === "nl" && NL["view." + v.name]) sp.textContent = `${NL["view." + v.name]}: ${pr ? pr.name : v.project}`;
+      const x = document.createElement("span"); x.className = "x"; x.textContent = "✕";
+      x.onclick = async () => { const views = S.project.views.slice(); views.splice(i, 1); S.project = await patch(`/api/projects/${pid()}`, { views }); renderViews(); setupExport(); };
+      li.append(sp, x); ul.append(li);
+    });
+  }
+  $("#btn-view-add").onclick = async () => {
+    const vp = $("#view-project").value; if (!vp) return;
+    const views = (S.project.views || []).concat([{ project: vp, name: $("#view-name").value }]);
+    try { S.project = await patch(`/api/projects/${pid()}`, { views }); renderViews(); setupExport(); } catch (e) { toast(e.message, true); }
+  };
   $("#proj-name").onchange = async (e) => { try { S.project = await patch(`/api/projects/${pid()}`, { name: e.target.value }); updateStepButtons(); } catch (err) { toast(err.message, true); } };
   for (const inp of $$("input.tb")) inp.onchange = async () => {
     const tb = {}; for (const i of $$("input.tb")) tb[i.dataset.tb] = i.value;
@@ -860,7 +992,7 @@
     const ip = toImg(sx, sy);
     if (S.step === "calibrate") {
       const max = calMode() === "two_point" ? 2 : 4;
-      if (calMode() === "aruco") return;
+      if (calMode() === "aruco" || calMode().startsWith("board")) return;
       if (S.calPoints.length >= max) S.calPoints = [];
       S.calPoints.push(ip); draw();
     } else if (S.step === "isolate") {
@@ -871,6 +1003,7 @@
         segHist.snap();
         if (hit >= 0) g.dragPoint = hit; else { g.polygon.push(ip); g.dragPoint = g.polygon.length - 1; }
       } else if (g.tool === "box") { g.drag = [ip[0], ip[1], 0, 0]; g.dragStart = ip; }
+      else if (g.tool === "smart") { segHist.snap(); (e.altKey ? g.smartBg : g.smartFg).push(ip); }
       else g.stroke = { kind: g.tool, pts: [ip], r: +$("#brush-size").value };
       draw();
     } else if (S.step === "outline") {
@@ -889,7 +1022,15 @@
       const dim = { p1: S.measure.pending, p2: sp, kind: S.measure.tool, auto_mm: 0, manual_mm: null, label: "", offset_mm: 0, style: $("#dim-style").value };
       dim.auto_mm = dimAuto(dim);
       if (dim.auto_mm < 0.5) { S.measure.pending = null; draw(); return; }
-      annHist.snap(); S.drawing.dimensions.push(dim); S.measure.pending = null; saveAnnotations();
+      annHist.snap();
+      if (S.armed != null && S.drawing.checklist && S.drawing.checklist[S.armed]) {
+        const c = S.drawing.checklist[S.armed];
+        dim.label = LANG === "nl" ? c.nl : c.en; dim.kind = c.kind === "value" ? "aligned" : c.kind;
+        dim.auto_mm = dimAuto(dim);
+        c.dim_id = `D${S.drawing.dimensions.length + 1}`; c.value_mm = null; S.armed = null;
+        $("#viewer-hint").textContent = t("Click 2 points for a dimension · drag a dimension line to move it · right-drag = pan");
+      }
+      S.drawing.dimensions.push(dim); S.measure.pending = null; saveAnnotations();
     } else if (S.step === "draw") {
       const mm = snapPoint(screenToMm(sx, sy)).p;
       if (S.draw.tool === "text") { const text = prompt(t("Text")); if (!text) return; annHist.snap(); S.drawing.sketches.push({ points: [mm], style: "solid", arrow: false, text }); saveAnnotations(); return; }
@@ -949,7 +1090,7 @@
       if (S.step === "outline" && S.outlineTool === "edit" && S.edit.sel) { e.preventDefault(); const h = editHandles().find((x) => x.key === S.edit.sel.key); if (h) deleteHandle(h); S.edit.sel = null; }
       if (S.step === "draw" && S.draw.pts.length) { e.preventDefault(); S.draw.pts.pop(); draw(); }
     }
-    if (S.step === "isolate") { const map = { p: "points", b: "box", s: "fg", g: "bg", e: "erase" }; if (map[e.key]) setSegTool(map[e.key]); }
+    if (S.step === "isolate") { const map = { p: "points", b: "box", s: "fg", g: "bg", e: "erase", a: "smart" }; if (map[e.key] && (e.key !== "a" || AI)) setSegTool(map[e.key]); }
   });
   new ResizeObserver(resizeCanvas).observe($("#viewer"));
 

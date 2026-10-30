@@ -98,15 +98,23 @@ drawings (title block, "foto" in dimensions, finish names).
 Measurements only come out right when the reference and the face you measure
 lie **in the same plane**.
 
-1. Lay an **A4 sheet** flat on the stone face (or next to it, on the same
-   plane), or a printed **ArUco marker** (`python -m pvsketch marker --size 100`,
-   print at 100 %, check with a ruler). A ruler works too with the two-point
-   mode, but that mode does no perspective correction.
-2. Shoot as square-on as you can, with the whole stone and the reference in
-   frame, in flat light. Oblique shots are rectified, but accuracy drops with
-   the angle and with distance from the reference.
-3. Features that stand out of the plane (a moulding, a broken edge angled
-   away) will be foreshortened. Measure those by hand and register the value.
+1. **Use the marker board.** `python -m pvsketch board --paper a3` (or the
+   link on the first screen) writes a true-scale PDF with four ArUco markers.
+   Print at 100 %, check the 100 mm bar with a ruler, glue it flat on foam
+   board or MDF. Lay it on the stone face; it is found automatically and all
+   16 corners go into the calibration. A loose A4 sheet or a single 100 mm
+   marker also work, but paper curls.
+2. **Not the 0.5x ultra-wide lens.** Use 1x, step back, keep the stone in the
+   middle of the frame. For the last bit of accuracy make a **lens profile**:
+   print the checkerboard (first screen, "Camera lens profile"), photograph it
+   8-12 times from different angles with the lens you use, upload them. Later
+   photos from that camera are undistorted automatically.
+3. Shoot as square-on as you can, in flat light, whole stone and board in
+   frame. Oblique shots are rectified, but accuracy drops with the angle and
+   with distance from the board.
+4. Features that stand out of the plane (a moulding, a broken edge angled
+   away) are foreshortened. Measure those by hand and register the value, or
+   photograph the **side** as a second project and link it as a view.
 
 ## The steps in the app
 
@@ -116,9 +124,9 @@ lie **in the same plane**.
 | 2 Calibrate | Click the 4 corners of the sheet, or Detect the marker | Homography → rectified image at a fixed px/mm. Any corner order; portrait/landscape auto |
 | 3 Isolate | **Points**: click along the outer line (roughly), Run | GrabCut only looks for the exact edge inside a band around your points, so grey stone on a grey wall works. Or drag a **Box**. Correct with *stone* / *background* brushes and the **Eraser**; undo/redo everything. Tick *use the points exactly* to skip GrabCut |
 | 4 Outline | Douglas-Peucker simplification + least-squares **arc fitting** | Tolerance in mm, minimum arc radius/length so weathering bumps don't become arcs. **Edit vertices**: drag, double-click to add, Alt+click to delete (an arc becomes a line). Optional *detail* layer: Canny inside the stone after grain smoothing |
-| 5 Measure | Click 2 points → **aligned / horizontal / vertical** dimension (snaps to corners) | **Drag the dimension line** away from the stone, CAD-style, with extension lines. Solid / dashed / dotted. *Tidy up* fans them out. Type the **tape value** to register it; the drawing shows it with the photo value in brackets. D1…Dn numbering matches the table, CSV and PDF |
+| 5 Measure | Pick an **element template** (raamdorpel, vensterbank, dorpel, muurafdekker, traptrede, gevelband, ornament, pinakel) to get the checklist of measurements that element needs; *Measure* arms an item so the next two clicks fill it in, or type values that can't be seen on the photo (thickness, depth). Click 2 points → **aligned / horizontal / vertical** dimension (snaps to corners) | **Drag the dimension line** away from the stone, CAD-style, with extension lines. Solid / dashed / dotted. *Tidy up* fans them out. Type the **tape value** to register it; the drawing shows it with the photo value in brackets. D1…Dn numbering matches the table, CSV and PDF |
 | 6 Draw | **Finish regions** (bewerkingen) and free lines | Click a polygon on the face and pick the finish: gefrijnd, gescharreerd, gegradineerd, gebouchardeerd, gespitst, randslag, gezoet, gepolijst, gezaagd, gevlamd, geschuurd. It is hatched with the matching pattern (direction and spacing adjustable), labelled F1…Fn and listed in the title block. Lines/arrows/leader text in solid, dashed or dotted |
-| 7 Export | DXF 2010, DXF R12, SVG, **PDF at true scale** (A4/A3 auto, 1:2 / 1:5 when it doesn't fit), CSV of measurements, PNG, JSON | All in mm. DXF: layers `OUTLINE`, `DETAIL`, `DIM`, `TEXT`, `$INSUNITS` = mm. R12 uses POLYLINE and exploded dimensions for old CAM/CAD software |
+| 7 Export | Link other projects as **views** (side, profile, top, back): they are drawn next to this one, tops aligned, under one title block. Then DXF 2010, DXF R12, SVG, **PDF at true scale** (A4/A3 auto, 1:2 / 1:5 when it doesn't fit), CSV of measurements, PNG, JSON | All in mm. DXF: layers `OUTLINE`, `DETAIL`, `DIM`, `TEXT`, `$INSUNITS` = mm. R12 uses POLYLINE and exploded dimensions for old CAM/CAD software |
 
 Viewer: wheel = zoom, right-drag (or shift-drag) = pan, `f` = fit, `Esc` = cancel,
 Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z redo. Isolate shortcuts: `p` points, `b` box,
@@ -143,6 +151,22 @@ python -m pvsketch run photo.jpg --aruco 100 --out out/
 # re-export a project from the web app
 python -m pvsketch export 20261030-221034-b22fff --out out/ --with-photo
 ```
+
+## Smart select (optional AI segmentation)
+
+GrabCut plus the Points tool handles most stones. For click-and-done on
+grey-on-grey, the Isolate step can use a Segment-Anything model that runs
+offline through onnxruntime. It is off until the model files are present:
+
+```bash
+python -m pvsketch models
+```
+
+prints the folder and the two file names (MobileSAM ONNX encoder and decoder,
+about 55 MB together, from the MobileSAM project), plus
+`pip install onnxruntime`. The sandbox this was built in could not download the
+weights, so the model path is tested with stub models only; if the real model
+raises an error in the UI, send it over and it will be fixed quickly.
 
 ## Accuracy on the synthetic sample
 
@@ -170,10 +194,15 @@ pvsketch/
   export_pdf.py  dependency-free vector PDF at true scale with title block + table
   export_table.py CSV of the registered measurements
   hatch.py       hatch patterns for hand finishes (lines, groups, dots, strokes, edge ticks)
+  board.py       A3/A4 marker board: true-scale PDF + 16-corner auto calibration
+  lens.py        checkerboard PDF, lens calibration, undistortion, camera profiles
+  templates.py   element templates (raamdorpel, vensterbank, ...) -> measurement checklist
+  views.py       several views (projects) of one element on one sheet
+  segment_ai.py  optional click-to-segment via a SAM ONNX model (onnxruntime)
   i18n.py        strings for exported drawings (en/nl) and finish names
   project.py     per-project folder: original, rectified.jpg, mask.png, project.json
   server/        Flask API + single-page UI (vanilla JS, no CDN, works offline)
-  __main__.py    serve / run / export / marker
+  __main__.py    serve / run / export / marker / board / models
 Dockerfile, render.yaml, docker-compose.yml   web deployment (gunicorn, password, Cloudflare Tunnel)
 samples/make_sample.py   synthetic test photo with ground truth
 tests/test_pipeline.py   end-to-end checks (python -m unittest)

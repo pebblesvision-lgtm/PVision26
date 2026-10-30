@@ -49,6 +49,14 @@
         <button id="btn-sample" class="ghost" data-i18n="photo.sample">Try the sample photo</button>
       </div>
       <p class="muted small" data-i18n="photo.marker">Best reference: the <a href="/api/board/a3.pdf">A3 marker board</a> (or <a href="/api/board/a4.pdf">A4</a>). Print at 100%, check the 100 mm bar with a ruler, glue it flat on foam board. Lay it on the stone face; it is detected automatically. A single <a href="/api/marker/0.png?size_mm=100">100 mm marker</a> or an A4 sheet also works.</p>
+      <details id="lens-box"><summary data-i18n="lens.h">Camera lens profile (removes barrel distortion)</summary>
+        <p class="small" data-i18n="lens.p">Phone lenses bend straight edges near the frame edge. Print the <a href="/api/checkerboard.pdf">checkerboard</a>, photograph it 8-12 times from different angles and distances with the lens you use for stone photos (never the 0.5x ultra-wide), upload them here. The profile is applied automatically to later photos from the same camera.</p>
+        <label><span data-i18n="lens.name">Profile name</span> <input id="lens-name" type="text" placeholder="iPhone 15 1x"></label>
+        <input type="file" id="lens-files" accept="image/*" multiple>
+        <div class="row"><button id="btn-lens-create" class="primary" data-i18n="lens.create">Create profile</button></div>
+        <div id="lens-result" class="result"></div>
+        <ul id="lens-list" class="list"></ul>
+      </details>
       <h3 data-i18n="photo.recent">Recent projects</h3>
       <ul id="project-list" class="list"></ul>
     </div>
@@ -81,6 +89,7 @@
       <div id="cal-two" hidden class="row">
         <label><span data-i18n="cal.dist">Distance mm</span> <input id="cal-dist" type="number" value="500" step="0.1"></label>
       </div>
+      <label><span data-i18n="lens.use">Lens profile for this photo</span> <select id="lens-select"><option value="">–</option></select></label>
       <p id="cal-instructions" class="hint-text"></p>
       <div class="row">
         <button id="btn-cal-clear" class="ghost" data-i18n="cal.clear">Clear points</button>
@@ -99,7 +108,9 @@
       <div class="row tools">
         <button class="tool active" data-tool="points" data-i18n="iso.points">Points</button>
         <button class="tool" data-tool="box" data-i18n="iso.box">Box</button>
+        <button class="tool" data-tool="smart" id="tool-smart" hidden data-i18n="iso.smart">Smart select (AI)</button>
       </div>
+      <p id="smart-help" class="muted small" hidden data-i18n="iso.smartp">Click on the stone (left) and on the background (Alt+click), then Run. The model finds the edge; GrabCut is not used.</p>
       <div class="row tools">
         <button class="tool" data-tool="fg" data-i18n="iso.fg">Stone brush</button>
         <button class="tool" data-tool="bg" data-i18n="iso.bg">Background brush</button>
@@ -222,6 +233,14 @@
         <label><span data-i18n="tb.drawn_by">Drawn by</span> <input class="tb" data-tb="drawn_by" type="text"></label>
       </div>
       <label><span data-i18n="tb.notes">Notes</span> <input class="tb" data-tb="notes" type="text"></label>
+      <h3 data-i18n="ex.views">Other views of this element on the same sheet</h3>
+      <p class="muted small" data-i18n="ex.viewsp">A side view, profile or top view is another project (another photo of the same element). Link it here; it is drawn next to this view, tops aligned, with the same title block.</p>
+      <div class="row">
+        <select id="view-project"></select>
+        <select id="view-name"><option value="side" data-i18n="view.side">Side view</option><option value="profile" data-i18n="view.profile">Profile</option><option value="top" data-i18n="view.top">Top view</option><option value="back" data-i18n="view.back">Back view</option></select>
+        <button id="btn-view-add" class="ghost" data-i18n="add">Add</button>
+      </div>
+      <ul id="view-list" class="list"></ul>
       <h3 data-i18n="ex.cad">For CAD / CAM / stone software</h3>
       <div class="col">
         <a class="button" id="exp-dxf" download>DXF 2010 (LWPOLYLINE, ARC, DIMENSION)</a>

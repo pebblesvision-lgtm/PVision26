@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from datetime import date
 
-from .geometry import Arc, Drawing, Polyline, dimension_geometry
+from .geometry import Arc, Drawing, Polyline, dimension_geometry, outline_loops
 from .i18n import finish_name, t as tr
 
 PAPER = {"a4": (210.0, 297.0), "a3": (297.0, 420.0)}
@@ -90,9 +90,9 @@ def drawing_to_pdf(dr: Drawing, paper: str = "auto", margin_mm: float = 15.0) ->
 
     # outline
     c.append(f"{_f(0.5 * PT * 0.6)} w 0 0 0 RG [] 0 d")
-    if dr.outline:
+    for loop in outline_loops(dr.outline):
         first = True
-        for prim in dr.outline:
+        for prim in loop:
             if isinstance(prim, Polyline):
                 for i, p in enumerate(prim.points):
                     x, y = X(p)
@@ -203,13 +203,15 @@ def drawing_to_pdf(dr: Drawing, paper: str = "auto", margin_mm: float = 15.0) ->
     for k, line in enumerate(lines[:5]):
         size = 3.4 if k == 0 else 2.8
         c.append(f"BT /F1 {_f(size*PT)} Tf 0 g {_f(m + 2*PT)} {_f(m + (title_h - 5 - 4.3*k)*PT)} Td ({_esc(line)}) Tj ET")
-    # measurement table (right part of title block) when there are dimensions
-    if dr.dimensions:
+    # measurement table (right part of title block): dimensions + typed checklist values
+    rows = [f"D{k+1} {d.label or ''}: {d.value_mm:.1f}" + (f" / {d.auto_mm:.1f}" if d.manual_mm is not None else "") + " mm"
+            for k, d in enumerate(dr.dimensions)]
+    rows += [f"{name}: {v:.1f} mm" for name, v in dr.typed_values()]
+    if rows:
         col = pw * PT * 0.56
         c.append(f"BT /F1 {_f(2.6*PT)} Tf 0 g {_f(col)} {_f(m + (title_h - 5)*PT)} Td ({_esc(tr(lang, 'measurements'))}) Tj ET")
-        for k, d in enumerate(dr.dimensions[:10]):
-            row = f"D{k+1} {d.label or ''}: {d.value_mm:.1f}" + (f" / {d.auto_mm:.1f}" if d.manual_mm is not None else "") + " mm"
-            cx_ = col + (k // 5) * (pw * PT * 0.2)
+        for k, row in enumerate(rows[:15]):
+            cx_ = col + (k // 5) * (pw * PT * 0.15)
             c.append(f"BT /F1 {_f(2.6*PT)} Tf {_f(cx_)} {_f(m + (title_h - 9 - 3.8*(k % 5))*PT)} Td ({_esc(row)}) Tj ET")
     # scale bar: 100 mm at drawing scale
     bar = 100.0 / s * PT

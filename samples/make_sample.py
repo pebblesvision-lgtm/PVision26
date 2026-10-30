@@ -40,6 +40,38 @@ def stone_polygon_mm(ox: float, oy: float, n_arc: int = 60) -> np.ndarray:
     return np.array(pts, dtype=np.float64)
 
 
+def make_board_sample(out_path: str, ppm: float = 3.0, seed: int = 2) -> dict:
+    """Same stone, but with the A3 marker board as reference (auto-detected)."""
+    import os, sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from pvsketch.board import board_image, BOARDS
+    rng = np.random.default_rng(seed)
+    W_mm, H_mm = 800.0, 450.0
+    W, H = int(W_mm * ppm), int(H_mm * ppm)
+    img = np.full((H, W, 3), 150, np.uint8)
+    img = (img.astype(np.int16) + rng.integers(-18, 18, (H, W, 1))).clip(0, 255).astype(np.uint8)
+    bw, bh = BOARDS["a3"]["size"]
+    board = cv2.resize(board_image("a3", dpi=100), (int(bw * ppm), int(bh * ppm)), interpolation=cv2.INTER_AREA)
+    bx, by = int(30 * ppm), int(60 * ppm)
+    img[by:by + board.shape[0], bx:bx + board.shape[1]] = cv2.cvtColor(board, cv2.COLOR_GRAY2BGR)
+    poly = stone_polygon_mm(470, 150)
+    stone = img.copy()
+    cv2.fillPoly(stone, [(poly * ppm).astype(np.int32)], (70, 85, 95))
+    stone = (stone.astype(np.int16) + rng.integers(-25, 25, (H, W, 1))).clip(0, 255).astype(np.uint8)
+    mask = np.zeros((H, W), np.uint8); cv2.fillPoly(mask, [(poly * ppm).astype(np.int32)], 255)
+    img[mask > 0] = stone[mask > 0]
+    src = np.array([[0, 0], [W, 0], [W, H], [0, H]], np.float32)
+    dst = np.array([[140, 80], [W - 70, 40], [W - 220, H - 50], [50, H - 130]], np.float32)
+    Hm = cv2.getPerspectiveTransform(src, dst)
+    photo = cv2.GaussianBlur(cv2.warpPerspective(img, Hm, (W, H), borderValue=(120, 120, 125)), (3, 3), 0)
+    cv2.imwrite(out_path, photo, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    stone_photo = cv2.perspectiveTransform((poly * ppm).reshape(-1, 1, 2).astype(np.float32), Hm).reshape(-1, 2)
+    truth = {"stone_polygon_px": stone_photo.round(2).tolist(), "stone_mm": {"width": STONE_W, "height": STONE_H, "corner_radius": STONE_R}}
+    with open(out_path.rsplit(".", 1)[0] + ".truth.json", "w") as f:
+        json.dump(truth, f, indent=1)
+    return truth
+
+
 def make(out_path: str, ppm: float = 3.0, seed: int = 1) -> dict:
     rng = np.random.default_rng(seed)
     W_mm, H_mm = 700.0, 420.0
@@ -91,6 +123,11 @@ def make(out_path: str, ppm: float = 3.0, seed: int = 1) -> dict:
 
 
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else "samples/sample.jpg"
-    t = make(out)
-    print(json.dumps(t, indent=1))
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if "--board" in sys.argv:
+        out = args[0] if args else "samples/sample-board.jpg"
+        print(json.dumps(make_board_sample(out)["stone_mm"]))
+    else:
+        out = args[0] if args else "samples/sample.jpg"
+        t = make(out)
+        print(json.dumps(t, indent=1))

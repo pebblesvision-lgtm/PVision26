@@ -5,12 +5,13 @@ import base64
 import io
 import os
 import shutil
+import threading
 import time
 from typing import Any
 
 import cv2
 import numpy as np
-from flask import Flask, Response, abort, jsonify, render_template, request, send_file
+from flask import Flask, Response, abort, g, jsonify, render_template, request, send_file
 
 from .. import calibrate as cal_mod
 from .. import segment as seg_mod
@@ -18,7 +19,11 @@ from ..export_dxf import drawing_to_dxf
 from ..export_pdf import drawing_to_pdf
 from ..export_svg import drawing_to_png, drawing_to_svg
 from ..export_table import dimensions_csv
+from .. import board as board_mod
+from .. import lens as lens_mod
+from .. import segment_ai
 from ..hatch import FINISH_DEFAULTS
+from ..templates import ELEMENT_TEMPLATES, templates_json
 from ..i18n import FINISH_NAMES
 from ..project import DEFAULT_WORKSPACE, Project
 
@@ -82,11 +87,28 @@ def create_app(workspace: str | None = None) -> Flask:
     def healthz():
         return jsonify({"ok": True})
 
+    # One lock per project, held for the rest of the request: a slow GrabCut
+    # can't save stale state over a faster edit that came in meanwhile.
+    _locks: dict[str, threading.RLock] = {}
+    _locks_guard = threading.Lock()
+
     def load(pid: str) -> Project:
+        with _locks_guard:
+            lock = _locks.setdefault(pid, threading.RLock())
+        lock.acquire()
+        g.setdefault("pvsketch_locks", []).append(lock)
         try:
             return Project.load(pid, app.config["WORKSPACE"])
         except FileNotFoundError:
             abort(404)
+
+    @app.teardown_request
+    def _release_locks(_exc):
+        for lock in g.pop("pvsketch_locks", []):
+            try:
+                lock.release()
+            except RuntimeError:
+                pass
 
     def err(msg: str, code: int = 400):
         return jsonify({"error": msg}), code
@@ -140,8 +162,71 @@ def create_app(workspace: str | None = None) -> Flask:
             p.state["lang"] = body["lang"]
         if isinstance(body.get("titleblock"), dict):
             p.set_titleblock(body["titleblock"])
+        if isinstance(body.get("views"), list):
+            p.set_views(body["views"], app.config["WORKSPACE"])
+        if "lens" in body:
+            try:
+                p.set_lens(body["lens"])
+            except ValueError as e:
+                return err(str(e))
         p.save()
         return jsonify(p.state)
+
+    # ------------------------------------------------------ lens profiles
+    @app.get("/api/cameras")
+    def cameras():
+        return jsonify(lens_mod.list_profiles(app.config["WORKSPACE"]))
+
+    @app.post("/api/cameras")
+    def create_camera():
+        files = request.files.getlist("photos")
+        if len(files) < 4:
+            return err("upload at least 4 checkerboard photos (8-12 is better)")
+        imgs, make, model = [], "", ""
+        for f in files:
+            data = f.read()
+            img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                continue
+            if not model:
+                make, model = lens_mod.exif_make_model(data)
+            imgs.append(img)
+        try:
+            prof = lens_mod.calibrate_lens(imgs, name=request.form.get("name") or model or "camera", make=make, model=model)
+        except (ValueError, cv2.error) as e:
+            return err(f"lens calibration failed: {e}")
+        lens_mod.save_profile(app.config["WORKSPACE"], prof)
+        return jsonify(prof)
+
+    @app.delete("/api/cameras/<name>")
+    def delete_camera(name):
+        return jsonify({"deleted": lens_mod.delete_profile(app.config["WORKSPACE"], name)})
+
+    @app.get("/api/checkerboard.pdf")
+    def checkerboard():
+        return send_file(io.BytesIO(lens_mod.checkerboard_pdf()), mimetype="application/pdf", as_attachment=True,
+                         download_name="pvsketch-checkerboard.pdf")
+
+    @app.get("/api/board/<board>.pdf")
+    def board_pdf(board):
+        board = board.lower()
+        if board not in board_mod.BOARDS:
+            abort(404)
+        return send_file(io.BytesIO(board_mod.board_pdf(board)), mimetype="application/pdf", as_attachment=True,
+                         download_name=f"pvsketch-board-{board}.pdf")
+
+    @app.get("/api/templates")
+    def templates():
+        return jsonify(templates_json(request.args.get("lang", "en")))
+
+    @app.put("/api/projects/<pid>/template")
+    def set_template(pid):
+        p = load(pid)
+        b = request.get_json(force=True) or {}
+        key = str(b.get("template", ""))
+        if key and key not in ELEMENT_TEMPLATES:
+            return err("unknown template")
+        return jsonify({"template": p.state["template"] if not key else key, "checklist": p.set_template(key)})
 
     @app.get("/api/finishes")
     def finishes():
@@ -167,7 +252,7 @@ def create_app(workspace: str | None = None) -> Flask:
                 abort(404)
             return _png_response(seg_mod.overlay(p.rectified(), m), jpeg=True)
         if kind == "preview":
-            dr = p.drawing()
+            dr = p.combined_drawing(app.config["WORKSPACE"])
             return _png_response(drawing_to_png(dr, px_per_mm=3, background=p.rectified()))
         abort(404)
 
@@ -194,6 +279,11 @@ def create_app(workspace: str | None = None) -> Flask:
                     cal = p.calibrate_quad(pts, w, h, ppm)
             elif mode == "aruco":
                 cal = p.calibrate_aruco(float(b.get("marker_mm", 100)), b.get("marker_id"), ppm)
+            elif mode == "board":
+                board = str(b.get("board", "a3")).lower()
+                if board not in board_mod.BOARDS:
+                    return err("unknown board")
+                cal = p.calibrate_board(board, ppm)
             elif mode == "two_point":
                 pts = b.get("points") or []
                 if len(pts) != 2:
@@ -231,6 +321,34 @@ def create_app(workspace: str | None = None) -> Flask:
             return err(f"segmentation failed: {e}")
         return jsonify({"mask_px": int((m > 0).sum()), "state": p.state})
 
+    # -------------------------------------------------------- smart select
+    _selector: dict[str, Any] = {}
+
+    @app.get("/api/ai")
+    def ai_status():
+        ok = segment_ai.available(app.config["WORKSPACE"])
+        return jsonify({"smart_select": ok, "models_dir": segment_ai.models_dir(app.config["WORKSPACE"])})
+
+    @app.post("/api/projects/<pid>/smartselect")
+    def smartselect(pid):
+        p = load(pid)
+        if not p.calibration:
+            return err("calibrate first")
+        if not segment_ai.available(app.config["WORKSPACE"]):
+            return err("smart select needs the model files; see `python -m pvsketch models`")
+        b = request.get_json(force=True) or {}
+        try:
+            if "sel" not in _selector:
+                _selector["sel"] = segment_ai.SmartSelector(app.config["WORKSPACE"])
+            m = _selector["sel"].mask(p.id, p.rectified(), b.get("fg", []), b.get("bg", []), b.get("box"))
+        except Exception as e:  # noqa: BLE001 - surface model/runtime problems to the UI
+            return err(f"smart select failed: {e}")
+        m = seg_mod.fill_mask_holes(seg_mod.largest_component(m)) if m.any() else m
+        p.set_mask(m)
+        p.state["segmentation"].update({"mode": "smart", "fg": b.get("fg", []), "bg": b.get("bg", [])})
+        p.save()
+        return jsonify({"mask_px": int((m > 0).sum()), "state": p.state})
+
     # ----------------------------------------------------------- outline
     @app.post("/api/projects/<pid>/outline")
     def outline(pid):
@@ -265,7 +383,7 @@ def create_app(workspace: str | None = None) -> Flask:
     def annotations(pid):
         p = load(pid)
         b = request.get_json(force=True) or {}
-        p.set_annotations(b.get("dimensions", []), b.get("labels", []), b.get("finishes"), b.get("sketches"))
+        p.set_annotations(b.get("dimensions", []), b.get("labels", []), b.get("finishes"), b.get("sketches"), b.get("checklist"))
         return jsonify(p.drawing().to_dict())
 
     # ------------------------------------------------------------ export
@@ -276,7 +394,7 @@ def create_app(workspace: str | None = None) -> Flask:
             return err("nothing to export yet")
         if request.args.get("lang") in ("en", "nl"):
             p.state["lang"] = request.args["lang"]
-        dr = p.drawing()
+        dr = p.drawing() if request.args.get("views") == "0" else p.combined_drawing(app.config["WORKSPACE"])
         name = (p.state.get("name") or p.id)
         with_photo = request.args.get("photo") == "1"
         if fmt == "svg":
