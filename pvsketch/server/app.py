@@ -12,7 +12,9 @@ from flask import Flask, abort, jsonify, render_template, request, send_file
 from .. import calibrate as cal_mod
 from .. import segment as seg_mod
 from ..export_dxf import drawing_to_dxf
+from ..export_pdf import drawing_to_pdf
 from ..export_svg import drawing_to_png, drawing_to_svg
+from ..export_table import dimensions_csv
 from ..project import DEFAULT_WORKSPACE, Project
 
 MAX_UPLOAD_MB = 60
@@ -146,11 +148,16 @@ def create_app(workspace: str | None = None) -> Flask:
             return err("calibrate first")
         b = request.get_json(force=True) or {}
         rect = b.get("rect")
-        if not rect or len(rect) != 4 or rect[2] < 4 or rect[3] < 4:
-            return err("drag a box around the stone first")
+        polygon = b.get("polygon") or []
+        mode = b.get("mode", "grabcut")
+        if rect and (len(rect) != 4 or rect[2] < 4 or rect[3] < 4):
+            rect = None
+        if not rect and len(polygon) < 3:
+            return err("drag a box around the stone or click points along its outer line first")
         try:
-            m = p.segment(rect, b.get("fg", []), b.get("bg", []), int(b.get("brush_px", 8)), int(b.get("iters", 5)))
-        except cv2.error as e:
+            m = p.segment(rect, b.get("fg", []), b.get("bg", []), int(b.get("brush_px", 8)), int(b.get("iters", 5)),
+                          strokes=b.get("strokes"), polygon=polygon, band_px=float(b.get("band_px", 20)), mode=mode)
+        except (cv2.error, ValueError) as e:
             return err(f"segmentation failed: {e}")
         return jsonify({"mask_px": int((m > 0).sum()), "state": p.state})
 
@@ -166,6 +173,15 @@ def create_app(workspace: str | None = None) -> Flask:
         except (ValueError, RuntimeError) as e:
             return err(str(e))
         return jsonify(dr)
+
+    @app.put("/api/projects/<pid>/outline")
+    def put_outline(pid):
+        p = load(pid)
+        b = request.get_json(force=True) or {}
+        try:
+            return jsonify(p.set_outline(b.get("outline") or []))
+        except (KeyError, ValueError, TypeError) as e:
+            return err(f"bad outline: {e}")
 
     @app.get("/api/projects/<pid>/drawing")
     def drawing(pid):
@@ -196,9 +212,20 @@ def create_app(workspace: str | None = None) -> Flask:
             return send_file(io.BytesIO(svg.encode("utf-8")), mimetype="image/svg+xml",
                              as_attachment=True, download_name=f"{name}.svg")
         if fmt == "dxf":
-            path = os.path.join(p.dir, "export.dxf")
-            drawing_to_dxf(dr, path)
-            return send_file(path, mimetype="application/dxf", as_attachment=True, download_name=f"{name}.dxf")
+            version = "R12" if request.args.get("version", "").upper() == "R12" else "R2010"
+            path = os.path.join(p.dir, f"export-{version}.dxf")
+            drawing_to_dxf(dr, path, version=version)
+            return send_file(path, mimetype="application/dxf", as_attachment=True,
+                             download_name=f"{name}{'-r12' if version == 'R12' else ''}.dxf")
+        if fmt == "pdf":
+            paper = request.args.get("paper", "auto").lower()
+            if paper not in ("auto", "a4", "a3"):
+                paper = "auto"
+            return send_file(io.BytesIO(drawing_to_pdf(dr, paper=paper)), mimetype="application/pdf",
+                             as_attachment=True, download_name=f"{name}.pdf")
+        if fmt == "csv":
+            return send_file(io.BytesIO(dimensions_csv(dr).encode("utf-8-sig")), mimetype="text/csv",
+                             as_attachment=True, download_name=f"{name}-measurements.csv")
         if fmt == "png":
             img = drawing_to_png(dr, px_per_mm=4, background=p.rectified() if with_photo else None)
             ok, buf = cv2.imencode(".png", img)

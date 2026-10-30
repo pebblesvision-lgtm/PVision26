@@ -19,7 +19,9 @@ sys.path.insert(0, os.path.join(ROOT, "samples"))
 from make_sample import make  # noqa: E402
 from pvsketch import calibrate as cal_mod  # noqa: E402
 from pvsketch.export_dxf import drawing_to_dxf  # noqa: E402
+from pvsketch.export_pdf import drawing_to_pdf  # noqa: E402
 from pvsketch.export_svg import drawing_to_svg  # noqa: E402
+from pvsketch.export_table import dimensions_csv  # noqa: E402
 from pvsketch.geometry import Arc  # noqa: E402
 from pvsketch.project import Project  # noqa: E402
 
@@ -70,11 +72,60 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue(lengths, "no detail lines")
         self.assertTrue(any(150 <= L <= 190 for L in lengths), f"crack (~168 mm) not traced: {lengths}")
 
+    def test_polygon_guided_grabcut_and_exact_polygon(self):
+        """A rough polygon (±12 px) around the stone must still give the true size."""
+        poly = np.asarray(self.truth["stone_polygon_px"], dtype=np.float64)
+        rect_poly = cal_mod.original_to_rectified(poly, self.cal)
+        rng = np.random.default_rng(0)
+        rough = (rect_poly + rng.uniform(-12, 12, rect_poly.shape)).tolist()
+        p = Project.from_path(self.photo, root=os.path.join(self.tmp.name, "ws2"))
+        p.calibrate_sheet(self.truth["a4_corners_px"], "a4")
+        p.segment(polygon=rough, band_px=25)
+        bb = p.outline({"detail": {"enabled": False}})["bbox"]
+        self.assertAlmostEqual(bb[2] - bb[0], 300, delta=3); self.assertAlmostEqual(bb[3] - bb[1], 180, delta=3)
+        # eraser: a background stroke through the stone, then erased, must not cut it
+        cx, cy = rect_poly.mean(axis=0)
+        strokes = [{"kind": "bg", "pts": [[cx - 100, cy], [cx + 100, cy]], "r": 10},
+                   {"kind": "erase", "pts": [[cx - 120, cy], [cx + 120, cy]], "r": 14}]
+        p.segment(polygon=rough, strokes=strokes, band_px=25)
+        bb = p.outline()["bbox"]
+        self.assertAlmostEqual(bb[3] - bb[1], 180, delta=3)
+        # exact polygon mode uses the clicked points as the mask
+        p.segment(polygon=rect_poly.tolist(), mode="polygon")
+        bb = p.outline()["bbox"]
+        self.assertAlmostEqual(bb[2] - bb[0], 300, delta=2)
+        # hand-edited outline round-trips
+        out = p.state["outline"]
+        d = p.set_outline(out)
+        self.assertTrue(p.state["outline_edited"]); self.assertEqual(len(d["outline"]), len(out))
+
+    def test_dimension_kinds(self):
+        from pvsketch.geometry import Dimension, dimension_geometry
+        h = Dimension(p1=(0, 0), p2=(30, 40), auto_mm=0, kind="horizontal", offset_mm=10)
+        v = Dimension(p1=(0, 0), p2=(30, 40), auto_mm=0, kind="vertical", offset_mm=-5)
+        a = Dimension(p1=(0, 0), p2=(30, 40), auto_mm=0, kind="aligned", offset_mm=0)
+        self.assertEqual(h.measured_auto(), 30); self.assertEqual(v.measured_auto(), 40); self.assertAlmostEqual(a.measured_auto(), 50)
+        g = dimension_geometry(h)
+        self.assertEqual(g["line"][0][1], 50); self.assertEqual(g["line"][1][1], 50)
+        g = dimension_geometry(v)
+        self.assertEqual(g["line"][0][0], -5)
+
     def test_exports(self):
         self.project.set_annotations(
-            [{"p1": [0, 0], "p2": [300, 0], "auto_mm": 0, "manual_mm": 301.5, "label": "W"}],
+            [{"p1": [0, 0], "p2": [300, 0], "auto_mm": 0, "manual_mm": 301.5, "label": "W", "kind": "horizontal", "offset_mm": 15, "style": "dashed"},
+             {"p1": [0, 0], "p2": [0, 180], "auto_mm": 0, "kind": "vertical", "offset_mm": -10}],
             [{"pos": [10, 10], "text": "test"}])
         dr = self.project.drawing()
+        pdf = drawing_to_pdf(dr)
+        self.assertTrue(pdf.startswith(b"%PDF-1.4")); self.assertIn(b"/MediaBox", pdf); self.assertIn(b"301.5", pdf)
+        csv_txt = dimensions_csv(dr)
+        self.assertIn("D1;W;horizontal;301.5;", csv_txt)
+        path12 = os.path.join(self.tmp.name, "t12.dxf")
+        drawing_to_dxf(dr, path12, version="R12")
+        import ezdxf
+        d12 = ezdxf.readfile(path12)
+        self.assertEqual(d12.dxfversion, "AC1009")
+        self.assertIn("POLYLINE", {e.dxftype() for e in d12.modelspace()})
         svg = drawing_to_svg(dr)
         self.assertIn('width="', svg); self.assertIn("mm\"", svg); self.assertIn("<path", svg); self.assertIn("301.5", svg)
         self.assertIn(" A ", svg)  # arcs exported as arc commands
@@ -126,8 +177,14 @@ class ServerTest(unittest.TestCase):
             bb = r.get_json()["bbox"]; self.assertAlmostEqual(bb[2] - bb[0], 300, delta=3)
             r = c.put(f"/api/projects/{pid}/annotations", json={"dimensions": [{"p1": [bb[0], bb[3]], "p2": [bb[2], bb[3]], "auto_mm": 0, "manual_mm": 300}], "labels": []})
             self.assertAlmostEqual(r.get_json()["dimensions"][0]["auto_mm"], 300, delta=3)
-            for fmt in ("svg", "dxf", "png", "json"):
+            for fmt in ("svg", "dxf", "dxf?version=R12", "png", "json", "pdf", "pdf?paper=a4", "csv"):
                 self.assertEqual(c.get(f"/api/projects/{pid}/export.{fmt}").status_code, 200, fmt)
+            # polygon + strokes through the API
+            poly = cal_mod.original_to_rectified(truth["stone_polygon_px"], cal).tolist()
+            r = c.post(f"/api/projects/{pid}/segment", json={"polygon": poly, "strokes": [{"kind": "erase", "pts": [[1, 1]], "r": 5}], "band_px": 20})
+            self.assertEqual(r.status_code, 200, r.data)
+            r = c.put(f"/api/projects/{pid}/outline", json={"outline": c.post(f"/api/projects/{pid}/outline", json={}).get_json()["outline"]})
+            self.assertEqual(r.status_code, 200, r.data)
             self.assertEqual(c.get(f"/api/projects/{pid}/image/overlay").status_code, 200)
             self.assertEqual(c.get("/api/marker/0.png?size_mm=80").status_code, 200)
 

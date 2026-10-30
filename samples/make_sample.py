@@ -78,6 +78,7 @@ def make(out_path: str, ppm: float = 3.0, seed: int = 1) -> dict:
         "a4_corners_px": a4_photo.round(2).tolist(),
         "stone_bbox_px": [float(v) for v in (stone_photo[:, 0].min(), stone_photo[:, 1].min(),
                                              stone_photo[:, 0].max(), stone_photo[:, 1].max())],
+        "stone_polygon_px": stone_photo.round(2).tolist(),
         "stone_mm": {"width": STONE_W, "height": STONE_H, "corner_radius": STONE_R, "notch": NOTCH},
         "a4_origin_mm": [40, 60], "stone_origin_mm": [320, 120],
     }

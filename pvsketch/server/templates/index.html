@@ -11,6 +11,8 @@
   <div class="brand">pvsketch <span class="muted">photo &rarr; true-scale outline (offline)</span></div>
   <div id="project-title" class="muted"></div>
   <div class="header-right">
+    <button id="btn-undo" class="ghost" title="Undo (Ctrl/Cmd+Z)">&#8630; Undo</button>
+    <button id="btn-redo" class="ghost" title="Redo (Ctrl/Cmd+Shift+Z)">&#8631; Redo</button>
     <button id="btn-projects" class="ghost">Projects</button>
     <button id="btn-new" class="ghost">New photo</button>
     <input type="file" id="file-input" accept="image/*" hidden>
@@ -38,7 +40,7 @@
     <div class="pane" data-pane="photo">
       <h2>1. Photo</h2>
       <p>Photograph the stone face <b>square-on if you can</b>, with a reference of known size lying flat <b>in the same plane</b> as the face you want to measure: an A4 sheet, a printed marker, or a ruler.</p>
-      <div id="dropzone">Drop a photo here or click to choose<br><span class="muted">JPEG / PNG / HEIC-converted, up to 60 MB</span></div>
+      <div id="dropzone">Drop a photo here or click to choose<br><span class="muted">JPEG / PNG, up to 60 MB</span></div>
       <p class="muted small">Need a marker? <a href="/api/marker/0.png?size_mm=100">Download a 100 mm ArUco marker</a> and print it at 100%. Check the printed size with a ruler before use.</p>
       <h3>Recent projects</h3>
       <ul id="project-list" class="list"></ul>
@@ -84,17 +86,24 @@
     <!-- 3 isolate -->
     <div class="pane" data-pane="isolate" hidden>
       <h2>3. Isolate the stone</h2>
-      <p class="hint-text">Drag a <b>box</b> around the stone, then <b>Run</b>. If parts are wrong, paint <b>stone</b> / <b>background</b> strokes and run again.</p>
+      <p class="hint-text">Best on real stone: <b>Points</b> - click along the outer line (roughly is fine), then <b>Run</b>. GrabCut only searches for the exact edge inside the band around your points. Or drag a <b>Box</b>. Fix mistakes with the brushes and the <b>Eraser</b>, undo with Ctrl/Cmd+Z.</p>
       <div class="row tools">
-        <button class="tool active" data-tool="box">Box</button>
-        <button class="tool" data-tool="fg">Stone brush</button>
-        <button class="tool" data-tool="bg">Background brush</button>
+        <button class="tool active" data-tool="points" title="Click points along the outer line. Drag a point to move it, Backspace removes the last one.">Points</button>
+        <button class="tool" data-tool="box" title="Drag a box around the stone">Box</button>
       </div>
-      <label>Brush size <input id="brush-size" type="range" min="2" max="60" value="12"> <span id="brush-size-v">12</span> px</label>
+      <div class="row tools">
+        <button class="tool" data-tool="fg" title="Paint: this is stone">Stone brush</button>
+        <button class="tool" data-tool="bg" title="Paint: this is background">Background brush</button>
+        <button class="tool" data-tool="erase" title="Remove paint">Eraser</button>
+      </div>
+      <label>Brush size <input id="brush-size" type="range" min="2" max="80" value="14"> <span id="brush-size-v">14</span> px</label>
+      <label>Search band around the points <input id="band-mm" type="range" min="2" max="40" step="1" value="10"> <span id="band-mm-v">10</span> mm</label>
+      <label><input id="seg-exact" type="checkbox"> Use the points exactly as the outline (skip GrabCut)</label>
       <label>GrabCut iterations <input id="gc-iters" type="number" min="1" max="20" value="5"></label>
       <div class="row">
-        <button id="btn-seg-clear" class="ghost">Clear strokes</button>
-        <button id="btn-segment" class="primary">Run GrabCut</button>
+        <button id="btn-seg-clear-points" class="ghost">Clear points</button>
+        <button id="btn-seg-clear" class="ghost">Clear paint</button>
+        <button id="btn-segment" class="primary">Run</button>
       </div>
       <div id="seg-result" class="result"></div>
     </div>
@@ -102,8 +111,12 @@
     <!-- 4 outline -->
     <div class="pane" data-pane="outline" hidden>
       <h2>4. Outline</h2>
-      <label>Simplification tolerance <input id="ol-eps" type="range" min="0.2" max="6" step="0.1" value="1.0"> <span id="ol-eps-v">1.0</span> mm</label>
+      <label>Simplification tolerance <input id="ol-eps" type="range" min="0.2" max="8" step="0.1" value="1.0"> <span id="ol-eps-v">1.0</span> mm</label>
       <label><input id="ol-arcs" type="checkbox" checked> Fit arcs (curves become true circular arcs)</label>
+      <div class="row">
+        <label>Min arc radius mm <input id="ol-minr" type="number" min="0" step="1" value="15"></label>
+        <label>Min arc length mm <input id="ol-minlen" type="number" min="0" step="1" value="12"></label>
+      </div>
       <label>Contour smoothing <input id="ol-smooth" type="number" min="1" max="25" value="5"> px</label>
       <h3>Detail lines (inside the stone)</h3>
       <label><input id="dt-on" type="checkbox"> Trace tooling marks / breaks / mouldings</label>
@@ -119,20 +132,34 @@
         <button id="btn-outline" class="primary">Extract outline</button>
       </div>
       <div id="ol-result" class="result"></div>
+      <h3>Edit by hand</h3>
+      <div class="row tools">
+        <button class="tool active" data-tool="view">View</button>
+        <button class="tool" data-tool="edit" title="Drag a vertex to move it. Double-click a segment to add a vertex. Alt+click (or Delete after selecting) removes a vertex; removing an arc turns it into a straight line.">Edit vertices</button>
+      </div>
+      <p class="muted small">Drag vertices, double-click a line to add one, Alt+click to delete. Re-extracting replaces your edits.</p>
       <label><input id="show-photo" type="checkbox" checked> Show photo under the drawing</label>
     </div>
 
     <!-- 5 measure -->
     <div class="pane" data-pane="measure" hidden>
       <h2>5. Measure &amp; register</h2>
-      <p class="hint-text">Click two points for a dimension (snaps to outline corners). The photo value is filled in; type the <b>tape-measured value</b> next to it to register it. The registered value goes on the drawing, the photo value is kept for reference.</p>
+      <p class="hint-text">Click two points for a dimension (snaps to outline corners). Then <b>drag the dimension line</b> away from the stone to keep things tidy, like in CAD. Type the <b>tape-measured value</b> to register it; it goes on the drawing with the photo value in brackets.</p>
       <div class="row tools">
-        <button class="tool active" data-tool="dim">Dimension</button>
+        <button class="tool active" data-tool="aligned" title="Distance along the two points">Aligned</button>
+        <button class="tool" data-tool="horizontal" title="Horizontal extent between the two points">Horizontal</button>
+        <button class="tool" data-tool="vertical" title="Vertical extent between the two points">Vertical</button>
+      </div>
+      <div class="row tools">
         <button class="tool" data-tool="label">Label</button>
         <button class="tool" data-tool="probe">Probe</button>
+        <label class="inline">Line <select id="dim-style"><option value="solid">solid</option><option value="dashed">dashed</option><option value="dotted">dotted</option></select></label>
       </div>
-      <label><input id="snap" type="checkbox" checked> Snap to outline</label>
-      <table id="dim-table"><thead><tr><th>#</th><th>Label</th><th>Photo mm</th><th>Measured mm</th><th></th></tr></thead><tbody></tbody></table>
+      <div class="row">
+        <label><input id="snap" type="checkbox" checked> Snap to outline</label>
+        <button id="btn-tidy" class="ghost" title="Spread the dimension lines out so they don't overlap">Tidy up</button>
+      </div>
+      <table id="dim-table"><thead><tr><th>#</th><th>Label</th><th>Photo</th><th>Measured</th><th>Off.</th><th></th><th></th></tr></thead><tbody></tbody></table>
       <ul id="label-list" class="list"></ul>
     </div>
 
@@ -141,11 +168,19 @@
       <h2>6. Export</h2>
       <p>All exports are at <b>true scale in millimetres</b>. Y is flipped for DXF (CAD y-up).</p>
       <label>Drawing name <input id="proj-name" type="text"></label>
+      <h3>For CAD / CAM / stone software</h3>
       <div class="col">
-        <a class="button" id="exp-svg" download>SVG (outline + dimensions)</a>
-        <a class="button" id="exp-svg-photo" download>SVG with rectified photo embedded</a>
-        <a class="button" id="exp-dxf" download>DXF (layers OUTLINE / DETAIL / DIM / TEXT)</a>
-        <a class="button" id="exp-png" download>PNG preview</a>
+        <a class="button" id="exp-dxf" download>DXF 2010 (LWPOLYLINE, ARC, DIMENSION)</a>
+        <a class="button" id="exp-dxf12" download>DXF R12 (max. compatibility, older programs)</a>
+        <a class="button" id="exp-svg" download>SVG (1 unit = 1 mm)</a>
+      </div>
+      <h3>For the workshop / the file</h3>
+      <div class="col">
+        <a class="button" id="exp-pdf" download>PDF, true scale on A4/A3 (auto)</a>
+        <div class="row"><a class="button ghost" id="exp-pdf-a4" download>PDF A4</a><a class="button ghost" id="exp-pdf-a3" download>PDF A3</a></div>
+        <a class="button" id="exp-csv" download>CSV of measurements (Excel)</a>
+        <a class="button ghost" id="exp-svg-photo" download>SVG with rectified photo embedded</a>
+        <a class="button ghost" id="exp-png" download>PNG preview</a>
         <a class="button ghost" id="exp-json" download>Project JSON (backup)</a>
       </div>
       <img id="export-preview" alt="">

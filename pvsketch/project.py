@@ -32,6 +32,8 @@ DEFAULT_OUTLINE_PARAMS: dict[str, Any] = {
     "epsilon_mm": 1.0,
     "arc_fit": True,
     "smooth_window": 5,
+    "min_arc_radius_mm": 15.0,
+    "min_arc_len_mm": 12.0,
     "detail": {"enabled": False, "low": 30, "high": 90, "min_len_mm": 15.0, "smooth": 5, "inset_mm": 3.0},
 }
 
@@ -219,12 +221,24 @@ class Project:
         return cal
 
     # ----------------------------------------------------------- segmentation
-    def segment(self, rect, fg=(), bg=(), brush_px: int = 8, iters: int = 5) -> np.ndarray:
+    def segment(self, rect=None, fg=(), bg=(), brush_px: int = 8, iters: int = 5, strokes=None,
+                polygon=None, band_px: float = 20.0, mode: str = "grabcut") -> np.ndarray:
+        """Run GrabCut (box and/or polygon guided, with strokes) or take the
+        polygon as the exact mask (``mode="polygon"``)."""
         img = self.rectified()
-        m = seg_mod.grabcut(img, rect, fg, bg, brush_px=brush_px, iters=iters)
+        st = seg_mod.normalise_strokes(fg, bg, strokes, brush_px)
+        poly = [list(map(float, p)) for p in (polygon or [])]
+        if mode == "polygon":
+            if len(poly) < 3:
+                raise ValueError("click at least 3 points along the outer line first")
+            m = seg_mod.exact_polygon(img.shape, poly, st)
+        else:
+            m = seg_mod.grabcut(img, rect, st, polygon=poly if len(poly) >= 3 else None,
+                                band_px=band_px, iters=iters)
         self._invalidate_from("segmentation")
-        self.state["segmentation"] = {"rect": [float(v) for v in rect], "fg": [list(map(list, s)) for s in fg],
-                                      "bg": [list(map(list, s)) for s in bg], "brush_px": brush_px, "iters": iters}
+        self.state["segmentation"] = {"rect": ([float(v) for v in rect] if rect else None),
+                                      "polygon": poly, "strokes": st, "brush_px": brush_px,
+                                      "iters": iters, "band_px": band_px, "mode": mode}
         cv2.imwrite(os.path.join(self.dir, "mask.png"), m)
         self._cache["mask"] = m
         self.save()
@@ -233,7 +247,7 @@ class Project:
     def set_mask(self, m: np.ndarray) -> None:
         """Accept an externally produced mask (e.g. a hand-painted one)."""
         self._invalidate_from("segmentation")
-        self.state["segmentation"] = {"rect": None, "fg": [], "bg": [], "external": True}
+        self.state["segmentation"] = {"rect": None, "polygon": [], "strokes": [], "external": True}
         cv2.imwrite(os.path.join(self.dir, "mask.png"), m)
         self._cache["mask"] = m
         self.save()
@@ -252,7 +266,9 @@ class Project:
                 else:
                     p[k] = v
         prims = contour_mod.extract_outline(m, cal.ppm, epsilon_mm=float(p["epsilon_mm"]),
-                                            arc_fit=bool(p["arc_fit"]), smooth_window=int(p.get("smooth_window", 5)))
+                                            arc_fit=bool(p["arc_fit"]), smooth_window=int(p.get("smooth_window", 5)),
+                                            min_arc_radius_mm=float(p.get("min_arc_radius_mm", 15.0)),
+                                            min_arc_len_mm=float(p.get("min_arc_len_mm", 12.0)))
         detail: list[Polyline] = []
         d = p["detail"]
         if d.get("enabled"):
@@ -261,7 +277,16 @@ class Project:
                                               inset_mm=float(d.get("inset_mm", 3.0)))
         self.state["outline_params"] = p
         self.state["outline"] = [x.to_dict() for x in prims]
+        self.state["outline_edited"] = False
         self.state["detail"] = [x.to_dict() for x in detail]
+        self.save()
+        return self.drawing().to_dict()
+
+    def set_outline(self, primitives: list[dict[str, Any]]) -> dict[str, Any]:
+        """Store a hand-edited outline (vertices moved/added/removed in the UI)."""
+        prims = [primitive_from_dict(d) for d in primitives]
+        self.state["outline"] = [x.to_dict() for x in prims]
+        self.state["outline_edited"] = True
         self.save()
         return self.drawing().to_dict()
 
@@ -272,8 +297,8 @@ class Project:
         for i, d in enumerate(dimensions):
             dim = Dimension.from_dict(d)
             if cal is not None:
-                dim.auto_mm = float(np.hypot(dim.p2[0] - dim.p1[0], dim.p2[1] - dim.p1[1]))
-            dim.id = dim.id or f"D{i+1}"
+                dim.auto_mm = float(dim.measured_auto())
+            dim.id = f"D{i+1}"
             dims.append(dim.to_dict())
         labs = []
         for i, l in enumerate(labels):

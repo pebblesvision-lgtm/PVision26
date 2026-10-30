@@ -9,7 +9,9 @@ from xml.sax.saxutils import escape
 import cv2
 import numpy as np
 
-from .geometry import Arc, Drawing, Polyline, primitive_points
+from .geometry import Arc, Drawing, Polyline, dimension_geometry, primitive_points, sample_arc
+
+DASH = {"solid": "", "dashed": "3 1.5", "dotted": "0.6 1.2"}
 
 
 def _fmt(v: float) -> str:
@@ -50,33 +52,32 @@ def _path_outline(prims) -> str:
     return " ".join(d)
 
 
-def _dimension_svg(dim, font: float, color: str) -> str:
-    (x1, y1), (x2, y2) = dim.p1, dim.p2
-    dx, dy = x2 - x1, y2 - y1
-    L = math.hypot(dx, dy)
+def _dimension_svg(dim, font: float, color: str, idx: int | None = None) -> str:
+    g = dimension_geometry(dim)
+    (q1, q2) = g["line"]
+    L = math.hypot(q2[0] - q1[0], q2[1] - q1[1])
     if L < 1e-6:
         return ""
-    nx, ny = -dy / L, dx / L  # normal for tick marks
-    t = font * 0.6
-    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-    ang = math.degrees(math.atan2(dy, dx))
-    if ang > 90 or ang < -90:
-        ang += 180
-    txt = f"{dim.value_mm:.1f}"
-    if dim.manual_mm is not None and abs(dim.manual_mm - dim.auto_mm) > 0.05:
-        txt += f" (photo {dim.auto_mm:.1f})"
-    if dim.label:
-        txt = f"{escape(dim.label)}: {txt}"
+    nx, ny = -(q2[1] - q1[1]) / L, (q2[0] - q1[0]) / L
+    t = font * 0.5
     sw = _fmt(font * 0.08)
-    return (
-        f'<g class="dim">'
-        f'<line x1="{_fmt(x1)}" y1="{_fmt(y1)}" x2="{_fmt(x2)}" y2="{_fmt(y2)}" stroke="{color}" stroke-width="{sw}"/>'
-        f'<line x1="{_fmt(x1 - nx*t)}" y1="{_fmt(y1 - ny*t)}" x2="{_fmt(x1 + nx*t)}" y2="{_fmt(y1 + ny*t)}" stroke="{color}" stroke-width="{sw}"/>'
-        f'<line x1="{_fmt(x2 - nx*t)}" y1="{_fmt(y2 - ny*t)}" x2="{_fmt(x2 + nx*t)}" y2="{_fmt(y2 + ny*t)}" stroke="{color}" stroke-width="{sw}"/>'
-        f'<text x="{_fmt(mx)}" y="{_fmt(my - font*0.35)}" font-size="{_fmt(font)}" text-anchor="middle" fill="{color}" '
-        f'transform="rotate({_fmt(ang)} {_fmt(mx)} {_fmt(my)})">{txt}</text>'
-        f'</g>'
-    )
+    dash = DASH.get(dim.style, "")
+    dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
+    parts = ['<g class="dim">']
+    for (a, b) in g["ext"]:
+        if math.dist(a, b) > 0.05:
+            parts.append(f'<line x1="{_fmt(a[0])}" y1="{_fmt(a[1])}" x2="{_fmt(b[0])}" y2="{_fmt(b[1])}" stroke="{color}" stroke-width="{_fmt(font*0.05)}" stroke-dasharray="0.8 0.8"/>')
+    parts.append(f'<line x1="{_fmt(q1[0])}" y1="{_fmt(q1[1])}" x2="{_fmt(q2[0])}" y2="{_fmt(q2[1])}" stroke="{color}" stroke-width="{sw}"{dash_attr}/>')
+    for q in (q1, q2):
+        parts.append(f'<line x1="{_fmt(q[0] - nx*t)}" y1="{_fmt(q[1] - ny*t)}" x2="{_fmt(q[0] + nx*t)}" y2="{_fmt(q[1] + ny*t)}" stroke="{color}" stroke-width="{sw}"/>')
+    mx, my = g["mid"]
+    txt = escape(g["text"])
+    if idx is not None:
+        txt = f"D{idx}  {txt}"
+    parts.append(f'<text x="{_fmt(mx)}" y="{_fmt(my - font*0.35)}" font-size="{_fmt(font)}" text-anchor="middle" fill="{color}" '
+                 f'transform="rotate({_fmt(g["angle_deg"])} {_fmt(mx)} {_fmt(my)})">{txt}</text>')
+    parts.append('</g>')
+    return "".join(parts)
 
 
 def drawing_to_svg(dr: Drawing, background: np.ndarray | None = None, margin_mm: float = 20.0,
@@ -89,7 +90,7 @@ def drawing_to_svg(dr: Drawing, background: np.ndarray | None = None, margin_mm:
     raster when given.
     """
     bbox = dr.outline_bbox()
-    pts_extra = [p for d in dr.dimensions for p in (d.p1, d.p2)] + [l.pos for l in dr.labels]
+    pts_extra = [p for d in dr.dimensions for p in (d.p1, d.p2, *dimension_geometry(d)["line"])] + [l.pos for l in dr.labels]
     if crop_to_outline and (bbox or pts_extra):
         xs = ([bbox[0], bbox[2]] if bbox else []) + [p[0] for p in pts_extra]
         ys = ([bbox[1], bbox[3]] if bbox else []) + [p[1] for p in pts_extra]
@@ -128,8 +129,8 @@ def drawing_to_svg(dr: Drawing, background: np.ndarray | None = None, margin_mm:
         parts.append('</g>')
     if dr.dimensions:
         parts.append('<g id="dimensions">')
-        for dim in dr.dimensions:
-            parts.append(_dimension_svg(dim, font, "#c00"))
+        for i, dim in enumerate(dr.dimensions, 1):
+            parts.append(_dimension_svg(dim, font, "#c00", idx=i))
         parts.append('</g>')
     if dr.labels:
         parts.append('<g id="labels">')
@@ -158,7 +159,10 @@ def drawing_to_svg(dr: Drawing, background: np.ndarray | None = None, margin_mm:
 def drawing_to_png(dr: Drawing, px_per_mm: float = 4.0, background: np.ndarray | None = None,
                    margin_mm: float = 20.0) -> np.ndarray:
     """Quick raster preview (BGR) of outline + dims, for the UI / sharing."""
-    bbox = dr.outline_bbox() or (0, 0, dr.width_mm, dr.height_mm)
+    bbox = list(dr.outline_bbox() or (0, 0, dr.width_mm, dr.height_mm))
+    for d in dr.dimensions:
+        for q in dimension_geometry(d)["line"]:
+            bbox[0] = min(bbox[0], q[0]); bbox[1] = min(bbox[1], q[1]); bbox[2] = max(bbox[2], q[0]); bbox[3] = max(bbox[3], q[1])
     x0, y0 = bbox[0] - margin_mm, bbox[1] - margin_mm
     W = int((bbox[2] - bbox[0] + 2 * margin_mm) * px_per_mm)
     H = int((bbox[3] - bbox[1] + 2 * margin_mm) * px_per_mm)
@@ -183,12 +187,15 @@ def drawing_to_png(dr: Drawing, px_per_mm: float = 4.0, background: np.ndarray |
     if outline_pts:
         pts = np.array([P(p) for p in outline_pts], np.int32)
         cv2.polylines(img, [pts], True, (0, 0, 0), 2, cv2.LINE_AA)
-    for d in dr.dimensions:
-        a, b = P(d.p1), P(d.p2)
-        cv2.line(img, a, b, (0, 0, 200), 1, cv2.LINE_AA)
-        cv2.circle(img, a, 3, (0, 0, 200), -1); cv2.circle(img, b, 3, (0, 0, 200), -1)
-        m = ((a[0] + b[0]) // 2, (a[1] + b[1]) // 2 - 6)
-        cv2.putText(img, f"{d.value_mm:.1f}", m, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 200), 1, cv2.LINE_AA)
+    for i, d in enumerate(dr.dimensions, 1):
+        g = dimension_geometry(d)
+        for (a, b) in g["ext"]:
+            cv2.line(img, P(a), P(b), (120, 120, 230), 1, cv2.LINE_AA)
+        q1, q2 = P(g["line"][0]), P(g["line"][1])
+        cv2.line(img, q1, q2, (0, 0, 200), 1, cv2.LINE_AA)
+        cv2.circle(img, q1, 3, (0, 0, 200), -1); cv2.circle(img, q2, 3, (0, 0, 200), -1)
+        m = ((q1[0] + q2[0]) // 2, (q1[1] + q2[1]) // 2 - 6)
+        cv2.putText(img, f"D{i} {g['text']}", m, cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 200), 1, cv2.LINE_AA)
     for lb in dr.labels:
         cv2.putText(img, lb.text, P(lb.pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 100, 0), 1, cv2.LINE_AA)
     return img

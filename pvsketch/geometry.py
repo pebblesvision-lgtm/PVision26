@@ -59,11 +59,17 @@ Primitive = Polyline | Arc
 
 @dataclass
 class Dimension:
-    """A measured distance between two points.
+    """A measured distance between two points, drawn CAD-style.
 
     ``auto_mm`` is what the calibrated photo says. ``manual_mm`` is the value the
     operator registered with a tape/caliper on site; when present it is the value
     that goes on the drawing, with the photo value kept for reference.
+
+    ``kind``   aligned (along p1-p2), horizontal (x extent) or vertical (y extent)
+    ``offset_mm`` how far the dimension line sits from the points (extension
+               lines bridge the gap), so eight dimensions on one ornament can be
+               fanned out instead of piling onto the outline
+    ``style``  solid | dashed | dotted
     """
     p1: Point
     p2: Point
@@ -71,10 +77,31 @@ class Dimension:
     manual_mm: float | None = None
     label: str = ""
     id: str = ""
+    kind: str = "aligned"
+    offset_mm: float = 0.0
+    style: str = "solid"
+    note: str = ""
 
     @property
     def value_mm(self) -> float:
         return self.manual_mm if self.manual_mm is not None else self.auto_mm
+
+    def measured_auto(self) -> float:
+        """Photo distance according to ``kind``."""
+        dx, dy = self.p2[0] - self.p1[0], self.p2[1] - self.p1[1]
+        if self.kind == "horizontal":
+            return abs(dx)
+        if self.kind == "vertical":
+            return abs(dy)
+        return math.hypot(dx, dy)
+
+    def text(self) -> str:
+        t = f"{self.value_mm:.1f}"
+        if self.manual_mm is not None and abs(self.manual_mm - self.auto_mm) > 0.05:
+            t += f" (photo {self.auto_mm:.1f})"
+        if self.label:
+            t = f"{self.label}: {t}"
+        return t
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -83,11 +110,51 @@ class Dimension:
 
     @staticmethod
     def from_dict(d: dict[str, Any]) -> "Dimension":
+        kind = d.get("kind") or "aligned"
+        if kind not in ("aligned", "horizontal", "vertical"):
+            kind = "aligned"
+        style = d.get("style") or "solid"
+        if style not in ("solid", "dashed", "dotted"):
+            style = "solid"
         return Dimension(
-            p1=tuple(d["p1"]), p2=tuple(d["p2"]), auto_mm=float(d["auto_mm"]),
+            p1=tuple(d["p1"]), p2=tuple(d["p2"]), auto_mm=float(d.get("auto_mm") or 0.0),
             manual_mm=(None if d.get("manual_mm") in (None, "") else float(d["manual_mm"])),
-            label=d.get("label", ""), id=d.get("id", ""),
+            label=str(d.get("label", "")), id=str(d.get("id", "")), kind=kind,
+            offset_mm=float(d.get("offset_mm") or 0.0), style=style, note=str(d.get("note", "")),
         )
+
+
+def dimension_geometry(dim: Dimension) -> dict[str, Any]:
+    """Where to draw a dimension: extension lines, dimension line, text anchor.
+
+    Returned points are in mm (y-down). The same construction is mirrored in
+    the browser so the screen matches the export exactly.
+    """
+    (x1, y1), (x2, y2) = dim.p1, dim.p2
+    off = dim.offset_mm
+    if dim.kind == "horizontal":
+        yb = max(y1, y2) if off >= 0 else min(y1, y2)
+        yl = yb + off
+        q1, q2 = (x1, yl), (x2, yl)
+        ext = [((x1, y1), q1), ((x2, y2), q2)]
+        ang = 0.0
+    elif dim.kind == "vertical":
+        xb = max(x1, x2) if off >= 0 else min(x1, x2)
+        xl = xb + off
+        q1, q2 = (xl, y1), (xl, y2)
+        ext = [((x1, y1), q1), ((x2, y2), q2)]
+        ang = -90.0
+    else:
+        dx, dy = x2 - x1, y2 - y1
+        L = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy / L, dx / L
+        q1, q2 = (x1 + nx * off, y1 + ny * off), (x2 + nx * off, y2 + ny * off)
+        ext = [((x1, y1), q1), ((x2, y2), q2)]
+        ang = math.degrees(math.atan2(dy, dx))
+        if ang > 90 or ang < -90:
+            ang += 180
+    mid = ((q1[0] + q2[0]) / 2, (q1[1] + q2[1]) / 2)
+    return {"ext": ext, "line": (q1, q2), "mid": mid, "angle_deg": ang, "text": dim.text()}
 
 
 @dataclass

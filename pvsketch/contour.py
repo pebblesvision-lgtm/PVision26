@@ -69,6 +69,10 @@ def fit_circle(pts: np.ndarray) -> tuple[float, float, float, float] | None:
     return cx, cy, r, float(np.sqrt(np.mean(res ** 2)))
 
 
+def _arc_len(pts: np.ndarray) -> float:
+    return float(np.sum(np.hypot(np.diff(pts[:, 0]), np.diff(pts[:, 1]))))
+
+
 def _line_deviation(pts: np.ndarray) -> float:
     """Max distance of pts from the chord between first and last."""
     p0, p1 = pts[0], pts[-1]
@@ -81,7 +85,8 @@ def _line_deviation(pts: np.ndarray) -> float:
 
 
 def fit_lines_and_arcs(dense: np.ndarray, vertices_idx: np.ndarray, tol: float,
-                       min_arc_points: int = 3, max_radius: float | None = None) -> list[Primitive]:
+                       min_arc_points: int = 3, max_radius: float | None = None,
+                       min_radius: float = 0.0, min_arc_len: float = 0.0) -> list[Primitive]:
     """Replace runs of short segments on a closed contour by circular arcs.
 
     ``dense`` is the full contour, ``vertices_idx`` the indices (into dense) of
@@ -118,10 +123,14 @@ def fit_lines_and_arcs(dense: np.ndarray, vertices_idx: np.ndarray, tol: float,
             cx, cy, r, rms = fit
             if max_radius and r > max_radius:
                 break
+            if r < min_radius:
+                continue
             maxres = float(np.max(np.abs(np.hypot(pts[:, 0] - cx, pts[:, 1] - cy) - r)))
             if maxres > tol:
                 break
             if _line_deviation(pts) <= tol * 1.5:   # not curved enough to call an arc
+                continue
+            if min_arc_len and _arc_len(pts) < min_arc_len:
                 continue
             best = (span, cx, cy, r)
         if best:
@@ -170,7 +179,8 @@ def _vertex_indices(dense: np.ndarray, simplified: np.ndarray) -> np.ndarray:
 
 
 def extract_outline(mask: np.ndarray, ppm: float, epsilon_mm: float = 1.0, arc_fit: bool = True,
-                    arc_tol_mm: float | None = None, smooth_window: int = 5) -> list[Primitive]:
+                    arc_tol_mm: float | None = None, smooth_window: int = 5,
+                    min_arc_radius_mm: float = 15.0, min_arc_len_mm: float = 12.0) -> list[Primitive]:
     """Mask (rectified px) -> outline primitives in mm."""
     dense_px = outer_contour(mask)
     if dense_px is None:
@@ -185,7 +195,8 @@ def extract_outline(mask: np.ndarray, ppm: float, epsilon_mm: float = 1.0, arc_f
     vidx = _vertex_indices(dense, simp)
     tol = arc_tol_mm if arc_tol_mm is not None else eps * 1.2
     bbox_diag = math.hypot(np.ptp(dense[:, 0]), np.ptp(dense[:, 1]))
-    return fit_lines_and_arcs(dense, vidx, tol=tol, max_radius=bbox_diag * 3)
+    return fit_lines_and_arcs(dense, vidx, tol=tol, max_radius=bbox_diag * 3,
+                              min_radius=min_arc_radius_mm, min_arc_len=min_arc_len_mm)
 
 
 # ------------------------------------------------------------- details ----

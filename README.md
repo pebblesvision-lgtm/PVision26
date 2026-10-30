@@ -53,12 +53,21 @@ lie **in the same plane**.
 |---|---|---|
 | 1 Photo | Upload JPEG/PNG (60 MB cap) | Earlier projects are listed to reopen |
 | 2 Calibrate | Click the 4 corners of the sheet, or Detect the marker | Homography → rectified image at a fixed px/mm. Any corner order; portrait/landscape auto |
-| 3 Isolate | Drag a box around the stone, Run GrabCut | Paint *stone* / *background* strokes to correct, run again. Largest region kept, holes filled |
-| 4 Outline | Douglas-Peucker simplification + least-squares **arc fitting** | Tolerance in mm. Optional *detail* layer: Canny inside the stone after bilateral grain smoothing, thinned and traced to open/closed polylines |
-| 5 Measure | Click 2 points → dimension (snaps to outline corners) | The photo value is filled in; type the **tape value** to register it. The registered value goes on the drawing, the photo value stays visible in brackets |
-| 6 Export | SVG, SVG with the photo embedded, DXF, PNG, project JSON | All in mm. DXF: layers `OUTLINE`, `DETAIL`, `DIM`, `TEXT`, `$INSUNITS` = mm, aligned DIMENSION entities |
+| 3 Isolate | **Points**: click along the outer line (roughly), Run | GrabCut only looks for the exact edge inside a band around your points, so grey stone on a grey wall works. Or drag a **Box**. Correct with *stone* / *background* brushes and the **Eraser**; undo/redo everything. Tick *use the points exactly* to skip GrabCut |
+| 4 Outline | Douglas-Peucker simplification + least-squares **arc fitting** | Tolerance in mm, minimum arc radius/length so weathering bumps don't become arcs. **Edit vertices**: drag, double-click to add, Alt+click to delete (an arc becomes a line). Optional *detail* layer: Canny inside the stone after grain smoothing |
+| 5 Measure | Click 2 points → **aligned / horizontal / vertical** dimension (snaps to corners) | **Drag the dimension line** away from the stone, CAD-style, with extension lines. Solid / dashed / dotted. *Tidy up* fans them out. Type the **tape value** to register it; the drawing shows it with the photo value in brackets. D1…Dn numbering matches the table, CSV and PDF |
+| 6 Export | DXF 2010, DXF R12, SVG, **PDF at true scale** (A4/A3 auto, 1:2 / 1:5 when it doesn't fit), CSV of measurements, PNG, JSON | All in mm. DXF: layers `OUTLINE`, `DETAIL`, `DIM`, `TEXT`, `$INSUNITS` = mm. R12 uses POLYLINE and exploded dimensions for old CAM/CAD software |
 
-Viewer: wheel = zoom, right-drag (or shift-drag) = pan, `f` = fit, `Esc` = cancel.
+Viewer: wheel = zoom, right-drag (or shift-drag) = pan, `f` = fit, `Esc` = cancel,
+Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z redo. Isolate shortcuts: `p` points, `b` box,
+`s` stone brush, `g` background brush, `e` eraser, Backspace removes the last point.
+
+### Importing into stone software
+
+The DXF is the file to take into CAD/CAM. Try the 2010 version first; if the
+program complains, use the R12 one. Outline on layer `OUTLINE` as polylines and
+true arcs, measurements on `DIM`. The PDF is for the workshop and the project
+file, the CSV for a spreadsheet or a price calculation.
 
 ## Headless / batch
 
@@ -91,11 +100,13 @@ square-on photo, which is why hand-measured values are registered on top.
 ```
 pvsketch/
   calibrate.py   homography from quad / ArUco / two points; marker generator
-  segment.py     GrabCut with box + strokes, largest component, hole fill
+  segment.py     GrabCut guided by box / polygon band, ordered strokes with eraser
   contour.py     outer contour → simplify → lines + arcs; detail edge tracing
   geometry.py    Polyline / Arc / Dimension / Label / Drawing (mm, y-down)
   export_svg.py  SVG at 1 unit = 1 mm with title block and scale bar; PNG preview
-  export_dxf.py  DXF via ezdxf (y flipped to CAD y-up)
+  export_dxf.py  DXF via ezdxf (y flipped to CAD y-up), R2010 or R12
+  export_pdf.py  dependency-free vector PDF at true scale with title block + table
+  export_table.py CSV of the registered measurements
   project.py     per-project folder: original, rectified.jpg, mask.png, project.json
   server/        Flask API + single-page UI (vanilla JS, no CDN, works offline)
   __main__.py    serve / run / export / marker

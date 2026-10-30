@@ -1,35 +1,79 @@
 """Isolate the stone from its background with GrabCut (fully offline, no model).
 
-Workflow: the operator drags a rectangle around the stone on the rectified
-image; GrabCut does the rest. On weathered stone against a similar-coloured
-wall, a few foreground/background brush strokes fix the mistakes.
+Three ways to tell GrabCut where the stone is, which can be combined:
+
+* a **box** dragged around the stone (everything outside is background)
+* a **polygon** of points clicked along the outer line: inside (shrunk by a
+  band) is definite stone, outside (grown by the band) is definite background
+  and GrabCut only has to decide the exact edge within the band. On grey stone
+  against a grey wall this is what makes it work.
+* **brush strokes**: stone / background / erase, applied in order so an eraser
+  stroke undoes earlier paint under it.
+
+Or skip GrabCut altogether and use the polygon as the mask.
 """
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Any, Sequence
 
 import cv2
 import numpy as np
 
-Stroke = Sequence[Sequence[float]]  # [[x, y], ...] in rectified px
+Stroke = dict[str, Any]  # {"kind": "fg"|"bg"|"erase", "pts": [[x, y], ...], "r": px}
 
 WORK_MAX_SIDE = 1400  # GrabCut is O(pixels * iters); downscale big photos for it
 
+LBL_NONE, LBL_FG, LBL_BG = 0, 1, 2
 
-def _paint_strokes(mask: np.ndarray, strokes: Sequence[Stroke], value: int, radius: int) -> None:
+
+def normalise_strokes(fg: Sequence = (), bg: Sequence = (), strokes: Sequence[Stroke] | None = None,
+                      brush_px: int = 8) -> list[Stroke]:
+    """Accept both the old (fg/bg lists) and the new ordered-stroke format."""
+    out: list[Stroke] = []
+    for s in fg:
+        out.append({"kind": "fg", "pts": [list(map(float, p)) for p in s], "r": brush_px})
+    for s in bg:
+        out.append({"kind": "bg", "pts": [list(map(float, p)) for p in s], "r": brush_px})
+    for s in strokes or []:
+        if s.get("kind") not in ("fg", "bg", "erase") or not s.get("pts"):
+            continue
+        out.append({"kind": s["kind"], "pts": [list(map(float, p)) for p in s["pts"]],
+                    "r": int(s.get("r", brush_px))})
+    return out
+
+
+def _paint(layer: np.ndarray, pts: np.ndarray, value: int, radius: int) -> None:
+    pts = pts.astype(np.int32).reshape(-1, 2)
+    if len(pts) == 1:
+        cv2.circle(layer, tuple(pts[0]), max(1, radius), int(value), -1)
+    else:
+        cv2.polylines(layer, [pts], False, int(value), thickness=max(1, 2 * radius))
+
+
+def stroke_layer(shape: tuple[int, int], strokes: Sequence[Stroke], scale: float = 1.0) -> np.ndarray:
+    """Rasterise ordered strokes into a label layer (0 none, 1 stone, 2 background)."""
+    layer = np.zeros(shape, np.uint8)
     for s in strokes:
-        pts = np.asarray(s, dtype=np.int32).reshape(-1, 2)
-        if len(pts) == 1:
-            cv2.circle(mask, tuple(pts[0]), radius, int(value), -1)
-        else:
-            cv2.polylines(mask, [pts], False, int(value), thickness=max(1, 2 * radius))
+        val = {"fg": LBL_FG, "bg": LBL_BG, "erase": LBL_NONE}[s["kind"]]
+        _paint(layer, np.asarray(s["pts"], dtype=np.float64) * scale, val, max(1, int(round(s["r"] * scale))))
+    return layer
 
 
-def grabcut(img: np.ndarray, rect: Sequence[float], fg: Sequence[Stroke] = (), bg: Sequence[Stroke] = (),
-            brush_px: int = 8, iters: int = 5, keep_largest: bool = True, fill_holes: bool = True) -> np.ndarray:
+def polygon_mask(shape: tuple[int, int], polygon: Sequence[Sequence[float]], scale: float = 1.0) -> np.ndarray:
+    m = np.zeros(shape, np.uint8)
+    pts = (np.asarray(polygon, dtype=np.float64) * scale).astype(np.int32).reshape(-1, 1, 2)
+    if len(pts) >= 3:
+        cv2.fillPoly(m, [pts], 255)
+    return m
+
+
+def grabcut(img: np.ndarray, rect: Sequence[float] | None = None, strokes: Sequence[Stroke] = (),
+            polygon: Sequence[Sequence[float]] | None = None, band_px: float = 20.0,
+            iters: int = 5, keep_largest: bool = True, fill_holes: bool = True) -> np.ndarray:
     """Return a binary mask (uint8, 255 = stone) in rectified-image pixels.
 
-    ``rect`` is (x, y, w, h). Strokes are polylines in the same pixel space.
+    ``rect`` is (x, y, w, h); ``polygon`` a list of points; both in the same
+    pixel space as ``strokes``. At least one of rect/polygon is required.
     """
     h, w = img.shape[:2]
     scale = 1.0
@@ -39,31 +83,54 @@ def grabcut(img: np.ndarray, rect: Sequence[float], fg: Sequence[Stroke] = (), b
         work = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
     wh, ww = work.shape[:2]
 
-    x, y, rw, rh = [float(v) for v in rect]
-    x0 = int(max(0, min(ww - 2, round(x * scale))))
-    y0 = int(max(0, min(wh - 2, round(y * scale))))
-    x1 = int(max(x0 + 2, min(ww - 1, round((x + rw) * scale))))
-    y1 = int(max(y0 + 2, min(wh - 1, round((y + rh) * scale))))
-    gc_rect = (x0, y0, x1 - x0, y1 - y0)
-
     mask = np.full((wh, ww), cv2.GC_BGD, np.uint8)
-    mask[y0:y1, x0:x1] = cv2.GC_PR_FGD
+    gc_rect = None
+
+    if polygon is not None and len(polygon) >= 3:
+        poly = polygon_mask((wh, ww), polygon, scale)
+        band = max(2, int(round(band_px * scale)))
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * band + 1, 2 * band + 1))
+        inner = cv2.erode(poly, k)
+        outer = cv2.dilate(poly, k)
+        mask[outer > 0] = cv2.GC_PR_BGD
+        mask[poly > 0] = cv2.GC_PR_FGD
+        mask[inner > 0] = cv2.GC_FGD
+        x, y, rw, rh = cv2.boundingRect(outer)
+        gc_rect = (x, y, rw, rh)
+    elif rect is not None:
+        x, y, rw, rh = [float(v) for v in rect]
+        x0 = int(max(0, min(ww - 2, round(x * scale))))
+        y0 = int(max(0, min(wh - 2, round(y * scale))))
+        x1 = int(max(x0 + 2, min(ww - 1, round((x + rw) * scale))))
+        y1 = int(max(y0 + 2, min(wh - 1, round((y + rh) * scale))))
+        gc_rect = (x0, y0, x1 - x0, y1 - y0)
+        mask[y0:y1, x0:x1] = cv2.GC_PR_FGD
+    else:
+        raise ValueError("need a box or a polygon")
+
+    layer = stroke_layer((wh, ww), strokes, scale) if strokes else None
+    if layer is not None:
+        mask[layer == LBL_FG] = cv2.GC_FGD
+        mask[layer == LBL_BG] = cv2.GC_BGD
+
     bgd = np.zeros((1, 65), np.float64)
     fgd = np.zeros((1, 65), np.float64)
+    has_fg = np.isin(mask, (cv2.GC_FGD, cv2.GC_PR_FGD)).any()
+    has_bg = np.isin(mask, (cv2.GC_BGD, cv2.GC_PR_BGD)).any()
+    if not has_fg or not has_bg:
+        raise ValueError("the box/polygon must leave some background around the stone")
 
-    if fg or bg:
-        r = max(1, int(round(brush_px * scale)))
-        _paint_strokes(mask, [np.asarray(s) * scale for s in bg], cv2.GC_BGD, r)
-        _paint_strokes(mask, [np.asarray(s) * scale for s in fg], cv2.GC_FGD, r)
-        # GrabCut needs at least one probable/definite fg and bg pixel
-        if not np.isin(mask, (cv2.GC_FGD, cv2.GC_PR_FGD)).any():
-            mask[y0:y1, x0:x1] = cv2.GC_PR_FGD
-        cv2.grabCut(work, mask, gc_rect, bgd, fgd, int(iters), cv2.GC_INIT_WITH_MASK)
-    else:
+    if polygon is None and layer is None:
         cv2.grabCut(work, mask, gc_rect, bgd, fgd, int(iters), cv2.GC_INIT_WITH_RECT)
+    else:
+        cv2.grabCut(work, mask, gc_rect, bgd, fgd, int(iters), cv2.GC_INIT_WITH_MASK)
 
     out = np.where(np.isin(mask, (cv2.GC_FGD, cv2.GC_PR_FGD)), 255, 0).astype(np.uint8)
     out = cv2.morphologyEx(out, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    # hard constraints win over GrabCut's opinion
+    if layer is not None:
+        out[layer == LBL_FG] = 255
+        out[layer == LBL_BG] = 0
 
     if keep_largest:
         out = largest_component(out)
@@ -73,6 +140,18 @@ def grabcut(img: np.ndarray, rect: Sequence[float], fg: Sequence[Stroke] = (), b
         out = cv2.resize(out, (w, h), interpolation=cv2.INTER_LINEAR)
         out = np.where(out > 127, 255, 0).astype(np.uint8)
     return out
+
+
+def exact_polygon(img_shape: tuple[int, int], polygon: Sequence[Sequence[float]],
+                  strokes: Sequence[Stroke] = ()) -> np.ndarray:
+    """No GrabCut: the clicked polygon is the mask, strokes still add/remove."""
+    h, w = img_shape[:2]
+    m = polygon_mask((h, w), polygon)
+    if strokes:
+        layer = stroke_layer((h, w), strokes)
+        m[layer == LBL_FG] = 255
+        m[layer == LBL_BG] = 0
+    return fill_mask_holes(largest_component(m)) if m.any() else m
 
 
 def largest_component(mask: np.ndarray) -> np.ndarray:
