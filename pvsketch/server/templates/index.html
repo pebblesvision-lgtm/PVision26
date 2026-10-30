@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pvsketch - photo to production outline</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<header>
+  <div class="brand">pvsketch <span class="muted">photo &rarr; true-scale outline (offline)</span></div>
+  <div id="project-title" class="muted"></div>
+  <div class="header-right">
+    <button id="btn-projects" class="ghost">Projects</button>
+    <button id="btn-new" class="ghost">New photo</button>
+    <input type="file" id="file-input" accept="image/*" hidden>
+  </div>
+</header>
+
+<nav id="steps">
+  <button data-step="photo"     class="step">1 <span>Photo</span></button>
+  <button data-step="calibrate" class="step" disabled>2 <span>Calibrate</span></button>
+  <button data-step="isolate"   class="step" disabled>3 <span>Isolate</span></button>
+  <button data-step="outline"   class="step" disabled>4 <span>Outline</span></button>
+  <button data-step="measure"   class="step" disabled>5 <span>Measure</span></button>
+  <button data-step="export"    class="step" disabled>6 <span>Export</span></button>
+</nav>
+
+<main>
+  <section id="viewer">
+    <canvas id="canvas"></canvas>
+    <div id="status"></div>
+    <div id="viewer-hint" class="hint"></div>
+  </section>
+
+  <aside id="panel">
+    <!-- 1 photo -->
+    <div class="pane" data-pane="photo">
+      <h2>1. Photo</h2>
+      <p>Photograph the stone face <b>square-on if you can</b>, with a reference of known size lying flat <b>in the same plane</b> as the face you want to measure: an A4 sheet, a printed marker, or a ruler.</p>
+      <div id="dropzone">Drop a photo here or click to choose<br><span class="muted">JPEG / PNG / HEIC-converted, up to 60 MB</span></div>
+      <p class="muted small">Need a marker? <a href="/api/marker/0.png?size_mm=100">Download a 100 mm ArUco marker</a> and print it at 100%. Check the printed size with a ruler before use.</p>
+      <h3>Recent projects</h3>
+      <ul id="project-list" class="list"></ul>
+    </div>
+
+    <!-- 2 calibrate -->
+    <div class="pane" data-pane="calibrate" hidden>
+      <h2>2. Calibrate scale &amp; perspective</h2>
+      <label>Reference
+        <select id="cal-mode">
+          <option value="a4">A4 sheet (210 x 297 mm)</option>
+          <option value="a3">A3 sheet (297 x 420 mm)</option>
+          <option value="a5">A5 sheet (148 x 210 mm)</option>
+          <option value="letter">US Letter</option>
+          <option value="custom">Custom rectangle (W x H mm)</option>
+          <option value="aruco">ArUco marker (auto-detect)</option>
+          <option value="two_point">Two points (scale only, no perspective fix)</option>
+        </select>
+      </label>
+      <div id="cal-custom" hidden class="row">
+        <label>Width mm <input id="cal-w" type="number" value="210" step="0.1"></label>
+        <label>Height mm <input id="cal-h" type="number" value="297" step="0.1"></label>
+      </div>
+      <div id="cal-aruco" hidden class="row">
+        <label>Marker side mm <input id="cal-marker-mm" type="number" value="100" step="0.1"></label>
+        <button id="btn-aruco-detect" class="ghost">Detect</button>
+        <span id="aruco-result" class="muted small"></span>
+      </div>
+      <div id="cal-two" hidden class="row">
+        <label>Distance mm <input id="cal-dist" type="number" value="500" step="0.1"></label>
+      </div>
+      <p id="cal-instructions" class="hint-text">Click the <b>4 corners</b> of the sheet in the photo (any order). Zoom with the wheel for precision; drag with the right mouse button to pan.</p>
+      <div class="row">
+        <button id="btn-cal-clear" class="ghost">Clear points</button>
+        <button id="btn-calibrate" class="primary">Calibrate</button>
+      </div>
+      <div id="cal-result" class="result"></div>
+      <details><summary>Advanced</summary>
+        <label>Pixels per mm in rectified image (blank = auto) <input id="cal-ppm" type="number" step="0.1" placeholder="auto"></label>
+      </details>
+    </div>
+
+    <!-- 3 isolate -->
+    <div class="pane" data-pane="isolate" hidden>
+      <h2>3. Isolate the stone</h2>
+      <p class="hint-text">Drag a <b>box</b> around the stone, then <b>Run</b>. If parts are wrong, paint <b>stone</b> / <b>background</b> strokes and run again.</p>
+      <div class="row tools">
+        <button class="tool active" data-tool="box">Box</button>
+        <button class="tool" data-tool="fg">Stone brush</button>
+        <button class="tool" data-tool="bg">Background brush</button>
+      </div>
+      <label>Brush size <input id="brush-size" type="range" min="2" max="60" value="12"> <span id="brush-size-v">12</span> px</label>
+      <label>GrabCut iterations <input id="gc-iters" type="number" min="1" max="20" value="5"></label>
+      <div class="row">
+        <button id="btn-seg-clear" class="ghost">Clear strokes</button>
+        <button id="btn-segment" class="primary">Run GrabCut</button>
+      </div>
+      <div id="seg-result" class="result"></div>
+    </div>
+
+    <!-- 4 outline -->
+    <div class="pane" data-pane="outline" hidden>
+      <h2>4. Outline</h2>
+      <label>Simplification tolerance <input id="ol-eps" type="range" min="0.2" max="6" step="0.1" value="1.0"> <span id="ol-eps-v">1.0</span> mm</label>
+      <label><input id="ol-arcs" type="checkbox" checked> Fit arcs (curves become true circular arcs)</label>
+      <label>Contour smoothing <input id="ol-smooth" type="number" min="1" max="25" value="5"> px</label>
+      <h3>Detail lines (inside the stone)</h3>
+      <label><input id="dt-on" type="checkbox"> Trace tooling marks / breaks / mouldings</label>
+      <div class="row">
+        <label>Canny low <input id="dt-low" type="number" value="30"></label>
+        <label>high <input id="dt-high" type="number" value="90"></label>
+      </div>
+      <div class="row">
+        <label>Min length mm <input id="dt-minlen" type="number" value="15"></label>
+        <label>Grain smoothing <input id="dt-smooth" type="number" min="0" max="15" value="5"></label>
+      </div>
+      <div class="row">
+        <button id="btn-outline" class="primary">Extract outline</button>
+      </div>
+      <div id="ol-result" class="result"></div>
+      <label><input id="show-photo" type="checkbox" checked> Show photo under the drawing</label>
+    </div>
+
+    <!-- 5 measure -->
+    <div class="pane" data-pane="measure" hidden>
+      <h2>5. Measure &amp; register</h2>
+      <p class="hint-text">Click two points for a dimension (snaps to outline corners). The photo value is filled in; type the <b>tape-measured value</b> next to it to register it. The registered value goes on the drawing, the photo value is kept for reference.</p>
+      <div class="row tools">
+        <button class="tool active" data-tool="dim">Dimension</button>
+        <button class="tool" data-tool="label">Label</button>
+        <button class="tool" data-tool="probe">Probe</button>
+      </div>
+      <label><input id="snap" type="checkbox" checked> Snap to outline</label>
+      <table id="dim-table"><thead><tr><th>#</th><th>Label</th><th>Photo mm</th><th>Measured mm</th><th></th></tr></thead><tbody></tbody></table>
+      <ul id="label-list" class="list"></ul>
+    </div>
+
+    <!-- 6 export -->
+    <div class="pane" data-pane="export" hidden>
+      <h2>6. Export</h2>
+      <p>All exports are at <b>true scale in millimetres</b>. Y is flipped for DXF (CAD y-up).</p>
+      <label>Drawing name <input id="proj-name" type="text"></label>
+      <div class="col">
+        <a class="button" id="exp-svg" download>SVG (outline + dimensions)</a>
+        <a class="button" id="exp-svg-photo" download>SVG with rectified photo embedded</a>
+        <a class="button" id="exp-dxf" download>DXF (layers OUTLINE / DETAIL / DIM / TEXT)</a>
+        <a class="button" id="exp-png" download>PNG preview</a>
+        <a class="button ghost" id="exp-json" download>Project JSON (backup)</a>
+      </div>
+      <img id="export-preview" alt="">
+      <p class="muted small">Project files live in the workspace folder on this computer; nothing leaves the machine.</p>
+    </div>
+  </aside>
+</main>
+
+<div id="toast" hidden></div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
