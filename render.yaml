@@ -1,0 +1,13 @@
+# Render.com blueprint: New + > Blueprint > pick this repo. Free plan.
+services:
+  - type: web
+    name: pvsketch
+    runtime: docker
+    plan: free
+    branch: claude/beautiful-gauss-0i92a6
+    healthCheckPath: /healthz
+    envVars:
+      - key: PVSKETCH_PASSWORD
+        sync: false            # Render asks you for it on first deploy
+      - key: PVSKETCH_RETENTION_DAYS
+        value: "14"

@@ -32,6 +32,38 @@ python samples/make_sample.py samples/sample.jpg
 then upload `samples/sample.jpg`: it is a synthetic 300 × 180 mm stone with
 R90 corners and a 40 mm notch next to an A4 sheet, seen obliquely.
 
+## Run it as a web app (for testing from any device)
+
+The same app runs on a server; nothing changes except the launcher. Set
+`PVSKETCH_PASSWORD` so only you can reach it (any user name, that password),
+and `PVSKETCH_RETENTION_DAYS` so test projects are pruned.
+
+**Render.com, free, from this repository (about 5 minutes):**
+
+1. Sign in at <https://render.com> with your GitHub account.
+2. *New +* → *Blueprint* → pick `pebblesvision-lgtm/PVision26`. Render reads
+   `render.yaml` and asks for the password. Deploy.
+3. Open the URL Render gives you (`https://pvsketch-xxxx.onrender.com`).
+   The first request after 15 minutes idle takes ~1 minute: the free plan
+   sleeps. Every `git push` to the branch redeploys automatically.
+
+Free hosting has no persistent disk: projects vanish on redeploy or after
+sleep. Download the *Project JSON* or the exports you want to keep. For real
+use, run it on a machine of your own (the Docker image below, or the Quick
+start above) where the `workspace` folder stays.
+
+**Any Docker host** (Fly.io, Railway, Hugging Face Spaces, a NAS, a VPS):
+
+```bash
+docker build -t pvsketch .
+```
+
+```bash
+docker run -p 8000:8000 -e PVSKETCH_PASSWORD=choose-one -v $PWD/workspace:/data/workspace pvsketch
+```
+
+Then open <http://localhost:8000>. The `-v` keeps projects on the host disk.
+
 ## How to photograph
 
 Measurements only come out right when the reference and the face you measure
@@ -110,6 +142,7 @@ pvsketch/
   project.py     per-project folder: original, rectified.jpg, mask.png, project.json
   server/        Flask API + single-page UI (vanilla JS, no CDN, works offline)
   __main__.py    serve / run / export / marker
+Dockerfile, render.yaml   web deployment (gunicorn, basic-auth password, retention)
 samples/make_sample.py   synthetic test photo with ground truth
 tests/test_pipeline.py   end-to-end checks (python -m unittest)
 ```

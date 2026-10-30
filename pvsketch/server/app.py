@@ -1,13 +1,16 @@
 """Local, offline web UI. Everything runs on this machine; no external calls."""
 from __future__ import annotations
 
+import base64
 import io
 import os
+import shutil
+import time
 from typing import Any
 
 import cv2
 import numpy as np
-from flask import Flask, abort, jsonify, render_template, request, send_file
+from flask import Flask, Response, abort, jsonify, render_template, request, send_file
 
 from .. import calibrate as cal_mod
 from .. import segment as seg_mod
@@ -18,6 +21,24 @@ from ..export_table import dimensions_csv
 from ..project import DEFAULT_WORKSPACE, Project
 
 MAX_UPLOAD_MB = 60
+SAMPLE_PHOTO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "samples", "sample.jpg")
+
+
+def _prune_workspace(root: str, days: float) -> int:
+    """Delete project folders not touched for ``days`` (hosted/testing use)."""
+    cutoff = time.time() - days * 86400
+    n = 0
+    if not os.path.isdir(root):
+        return 0
+    for pid in os.listdir(root):
+        d = os.path.join(root, pid)
+        try:
+            if os.path.isdir(d) and os.path.getmtime(d) < cutoff:
+                shutil.rmtree(d, ignore_errors=True)
+                n += 1
+        except OSError:
+            continue
+    return n
 
 
 def _png_response(img: np.ndarray, jpeg: bool = False):
@@ -33,6 +54,31 @@ def create_app(workspace: str | None = None) -> Flask:
     app.config["WORKSPACE"] = os.path.abspath(workspace or DEFAULT_WORKSPACE)
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
     os.makedirs(app.config["WORKSPACE"], exist_ok=True)
+
+    # Hosted mode: PVSKETCH_PASSWORD protects everything with HTTP basic auth
+    # (any user name), PVSKETCH_RETENTION_DAYS prunes old projects.
+    password = os.environ.get("PVSKETCH_PASSWORD", "").strip()
+    retention = float(os.environ.get("PVSKETCH_RETENTION_DAYS", "0") or 0)
+
+    @app.before_request
+    def _auth():
+        if request.path == "/healthz" or not password:
+            return None
+        auth = request.headers.get("Authorization", "")
+        ok = False
+        if auth.startswith("Basic "):
+            try:
+                _, _, pw = base64.b64decode(auth[6:]).decode("utf-8").partition(":")
+                ok = pw == password
+            except (ValueError, UnicodeDecodeError):
+                ok = False
+        if not ok:
+            return Response("pvsketch: password required", 401, {"WWW-Authenticate": 'Basic realm="pvsketch"'})
+        return None
+
+    @app.get("/healthz")
+    def healthz():
+        return jsonify({"ok": True})
 
     def load(pid: str) -> Project:
         try:
@@ -58,10 +104,24 @@ def create_app(workspace: str | None = None) -> Flask:
         f = request.files.get("photo")
         if f is None or not f.filename:
             return err("no photo uploaded")
+        if retention:
+            _prune_workspace(app.config["WORKSPACE"], retention)
         try:
             p = Project.create(f.read(), f.filename, app.config["WORKSPACE"])
         except ValueError as e:
             return err(str(e))
+        return jsonify(p.state)
+
+    @app.post("/api/projects/sample")
+    def create_sample_project():
+        """Start a project from the bundled synthetic test photo."""
+        path = os.path.normpath(SAMPLE_PHOTO)
+        if not os.path.isfile(path):
+            from samples.make_sample import make  # type: ignore[import-not-found]
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            make(path)
+        with open(path, "rb") as fh:
+            p = Project.create(fh.read(), "sample.jpg", app.config["WORKSPACE"])
         return jsonify(p.state)
 
     @app.get("/api/projects/<pid>")

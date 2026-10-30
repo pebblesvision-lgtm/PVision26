@@ -435,6 +435,10 @@
   const dz = $("#dropzone");
   dz.onclick = () => $("#file-input").click();
   $("#btn-new").onclick = () => $("#file-input").click();
+  $("#btn-sample").onclick = async () => {
+    try { const st = await api("/api/projects/sample", { method: "POST" }); await openProject(st.id); toast("Sample loaded: click the 4 corners of the white A4 sheet"); goStep("calibrate"); }
+    catch (e) { toast(e.message, true); }
+  };
   $("#btn-projects").onclick = () => goStep("photo");
   $("#file-input").onchange = (e) => upload(e.target.files[0]);
   for (const ev of ["dragenter", "dragover"]) dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("over"); });
