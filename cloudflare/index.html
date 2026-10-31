@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>pvsketch - productietekening uit foto</title>
+<link rel="stylesheet" href="app.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1f242a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+<header>
+  <div class="brand">pvsketch</div>
+  <nav id="steps">
+    <button data-step="photo"   class="step">1 <span data-i18n="step.photo">Photo</span></button>
+    <button data-step="isolate" class="step" disabled>2 <span data-i18n="step.isolate">Isolate</span></button>
+    <button data-step="outline" class="step" disabled>3 <span data-i18n="step.outline">Outline</span></button>
+    <button data-step="measure" class="step" disabled>4 <span data-i18n="step.measure">Measure</span></button>
+    <button data-step="draw"    class="step" disabled>5 <span data-i18n="step.draw">Draw</span></button>
+    <button data-step="export"  class="step" disabled>6 <span data-i18n="step.export">Export</span></button>
+  </nav>
+  <div class="header-right">
+    <button id="btn-undo" class="ghost icon" title="Ctrl/Cmd+Z">&#8630;</button>
+    <button id="btn-redo" class="ghost icon" title="Ctrl/Cmd+Shift+Z">&#8631;</button>
+    <button id="btn-projects" class="ghost" data-i18n="projects">Projects</button>
+    <button id="btn-new" class="ghost" data-i18n="newphoto">New photo</button>
+    <button id="btn-settings" class="ghost icon" title="Instellingen / Settings">&#9881;</button>
+    <input type="file" id="file-input" accept="image/*" hidden>
+    <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+  </div>
+  <div id="settings" hidden>
+    <label><span data-i18n="set.lang">Language / Taal</span> <select id="lang"><option value="nl">Nederlands</option><option value="en">English</option></select></label>
+    <label><input id="set-tips" type="checkbox" checked> <span data-i18n="set.tips">Show explanations</span></label>
+    <div id="project-title" class="muted small"></div>
+  </div>
+</header>
+
+<main>
+  <section id="viewer">
+    <canvas id="canvas"></canvas>
+    <div id="status"></div>
+    <div id="viewer-hint" class="hint"></div>
+    <div id="view-btns"><button id="btn-zoom-in">+</button><button id="btn-zoom-out">&minus;</button><button id="btn-fit" title="fit (f)">&#8982;</button></div>
+  </section>
+
+  <aside id="panel">
+    <!-- 1 photo -->
+    <div class="pane" data-pane="photo">
+      <h2 data-i18n="photo.h">1. Photo</h2>
+      <p class="tip" data-i18n="photo.p">Photograph the stone face <b>square-on</b>, in flat light. The photo only gives the shape; every measurement is typed in by you.</p>
+      <div id="dropzone" data-i18n="photo.drop">Drop a photo here or tap to choose<br><span class="muted">JPEG / PNG / HEIC</span></div>
+      <div class="row">
+        <button id="btn-camera" class="primary big" data-i18n="photo.camera">Take a photo</button>
+        <button id="btn-sample" class="ghost" data-i18n="photo.sample">Sample photo</button>
+      </div>
+      <div class="static-only">
+        <button id="btn-import" class="ghost" style="width:100%" data-i18n="photo.import">Open project (.json)</button>
+        <input type="file" id="import-input" accept=".json,application/json" hidden>
+        <p class="tip small" data-i18n="photo.storage">Projects are stored on this device, in the browser. Back up via Export → JSON, or install the app via Share → Add to Home Screen.</p>
+      </div>
+      <h3 data-i18n="photo.recent">Recent projects</h3>
+      <ul id="project-list" class="list scroll"></ul>
+    </div>
+
+    <!-- 2 isolate -->
+    <div class="pane" data-pane="isolate" hidden>
+      <h2 data-i18n="iso.h">2. Isolate the stone</h2>
+      <p class="tip" data-i18n="iso.p"><b>Points</b>: tap along the outer line (roughly is fine), then <b>Run</b>. The edge is found inside the band around your points. Or drag a <b>Box</b>. Fix mistakes with the brushes and the <b>Eraser</b>.</p>
+      <div class="row tools">
+        <button class="tool active" data-tool="points" data-i18n="iso.points">Points</button>
+        <button class="tool" data-tool="box" data-i18n="iso.box">Box</button>
+        <button class="tool" data-tool="fg" data-i18n="iso.fg">Stone</button>
+        <button class="tool" data-tool="bg" data-i18n="iso.bg">Background</button>
+        <button class="tool" data-tool="erase" data-i18n="iso.erase">Eraser</button>
+      </div>
+      <div class="row">
+        <label><span data-i18n="iso.brush">Brush</span> <input id="brush-size" type="range" min="2" max="80" value="14"> <span id="brush-size-v">14</span> px</label>
+        <label><span data-i18n="iso.band">Band</span> <input id="band-mm" type="range" min="2" max="60" step="1" value="12"> <span id="band-mm-v">12</span></label>
+      </div>
+      <label><input id="seg-exact" type="checkbox"> <span data-i18n="iso.exact">Use the points exactly as the outline</span></label>
+      <div class="row">
+        <button id="btn-seg-clear-points" class="ghost" data-i18n="iso.clearpts">Clear points</button>
+        <button id="btn-seg-clear" class="ghost" data-i18n="iso.clearpaint">Clear paint</button>
+        <button id="btn-segment" class="primary big" data-i18n="run">Run</button>
+      </div>
+      <div id="seg-result" class="result"></div>
+      <details><summary data-i18n="advanced">Advanced</summary>
+        <label><span data-i18n="iso.iters">GrabCut iterations</span> <input id="gc-iters" type="number" min="1" max="20" value="5"></label>
+      </details>
+    </div>
+
+    <!-- 3 outline -->
+    <div class="pane" data-pane="outline" hidden>
+      <h2 data-i18n="ol.h">3. Outline</h2>
+      <label><span data-i18n="ol.eps">Simplification</span> <input id="ol-eps" type="range" min="0.2" max="8" step="0.1" value="1.0"> <span id="ol-eps-v">1.0</span></label>
+      <div class="row">
+        <label><input id="ol-arcs" type="checkbox" checked> <span data-i18n="ol.arcs">Fit arcs</span></label>
+        <label><input id="dt-on" type="checkbox"> <span data-i18n="ol.dton">Detail lines</span></label>
+      </div>
+      <div class="row">
+        <button id="btn-outline" class="primary big" data-i18n="ol.go">Extract outline</button>
+      </div>
+      <div id="ol-result" class="result"></div>
+      <div class="row tools">
+        <button class="tool active" data-tool="view" data-i18n="ol.view">View</button>
+        <button class="tool" data-tool="edit" data-i18n="ol.edit">Edit vertices</button>
+      </div>
+      <p class="tip" data-i18n="ol.editp">Drag vertices, double-tap a line to add one, Alt+click (or select + Delete) to remove. Re-extracting replaces your edits.</p>
+      <label><input id="show-photo" type="checkbox" checked> <span data-i18n="showphoto">Show photo under the drawing</span></label>
+      <details><summary data-i18n="advanced">Advanced</summary>
+        <div class="row">
+          <label><span data-i18n="ol.minr">Min arc radius</span> <input id="ol-minr" type="number" min="0" step="1" value="15"></label>
+          <label><span data-i18n="ol.minlen">Min arc length</span> <input id="ol-minlen" type="number" min="0" step="1" value="12"></label>
+          <label><span data-i18n="ol.smooth">Smoothing px</span> <input id="ol-smooth" type="number" min="1" max="25" value="5"></label>
+        </div>
+        <div class="row">
+          <label>Canny <span data-i18n="low">low</span> <input id="dt-low" type="number" value="30"></label>
+          <label><span data-i18n="high">high</span> <input id="dt-high" type="number" value="90"></label>
+          <label><span data-i18n="ol.minlenmm">Min length</span> <input id="dt-minlen" type="number" value="15"></label>
+          <label><span data-i18n="ol.grain">Grain</span> <input id="dt-smooth" type="number" min="0" max="15" value="5"></label>
+        </div>
+      </details>
+    </div>
+
+    <!-- 4 measure -->
+    <div class="pane" data-pane="measure" hidden>
+      <h2 data-i18n="me.h">4. Measure</h2>
+      <p class="tip" data-i18n="me.p">Tap two points, then type the value you measured. <b>Nothing is measured from the photo.</b> The first value you type sets the scale of the drawing. Drag a dimension line to move it away from the stone.</p>
+      <div id="scale-line" class="result"></div>
+      <div id="value-entry" hidden>
+        <label><span id="value-entry-label"></span>
+          <div class="row"><input id="value-input" type="number" inputmode="decimal" step="0.5" placeholder="mm" autocomplete="off"><button id="btn-value-ok" class="primary">OK</button></div>
+        </label>
+      </div>
+      <label><span data-i18n="me.template">Element template</span> <select id="tpl-select"><option value="">–</option></select></label>
+      <div class="scroll"><table id="checklist" hidden><thead><tr><th data-i18n="me.item">Measurement</th><th>mm</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="row tools">
+        <button class="tool active" data-tool="aligned" data-i18n="me.aligned">Aligned</button>
+        <button class="tool" data-tool="horizontal" data-i18n="me.horizontal">Horizontal</button>
+        <button class="tool" data-tool="vertical" data-i18n="me.vertical">Vertical</button>
+        <button class="tool" data-tool="label" data-i18n="me.label">Text</button>
+      </div>
+      <div class="row">
+        <label class="inline"><input id="snap" type="checkbox" checked> <span data-i18n="me.snap">Snap</span></label>
+        <label class="inline"><span data-i18n="line">Line</span> <select id="dim-style"><option value="solid" data-i18n="solid">solid</option><option value="dashed" data-i18n="dashed">dashed</option><option value="dotted" data-i18n="dotted">dotted</option></select></label>
+        <button id="btn-tidy" class="ghost" data-i18n="me.tidy">Tidy up</button>
+      </div>
+      <div class="scroll"><table id="dim-table"><thead><tr><th>#</th><th data-i18n="label">Label</th><th data-i18n="me.value">mm</th><th data-i18n="me.off">Off.</th><th></th><th></th><th></th></tr></thead><tbody></tbody></table>
+      <ul id="label-list" class="list"></ul></div>
+    </div>
+
+    <!-- 5 draw -->
+    <div class="pane" data-pane="draw" hidden>
+      <h2 data-i18n="dr.h">5. Finishes &amp; drawing</h2>
+      <p class="tip" data-i18n="dr.p">Tap the corners of a face area, then <b>Close region</b>. It is hatched with the pattern of that finish and labelled F1, F2… Lines, arrows and text for anything else.</p>
+      <div class="row tools">
+        <button class="tool active" data-tool="region" data-i18n="dr.region">Finish region</button>
+        <button class="tool" data-tool="line" data-i18n="dr.line">Line</button>
+        <button class="tool" data-tool="arrow" data-i18n="dr.arrow">Arrow + text</button>
+        <button class="tool" data-tool="text" data-i18n="dr.text">Text</button>
+      </div>
+      <div id="dr-region-opts">
+        <label><span data-i18n="dr.kind">Finish</span> <select id="fin-kind"></select></label>
+        <div class="row">
+          <label><span data-i18n="dr.strokes">Strokes per 10 cm</span> <input id="fin-strokes" type="number" inputmode="decimal" step="1" placeholder="–"></label>
+          <label><span data-i18n="dr.angle">Direction °</span> <input id="fin-angle" type="number" step="5" placeholder="auto"></label>
+          <label><span data-i18n="dr.width">Band mm</span> <input id="fin-width" type="number" step="1" placeholder="25"></label>
+        </div>
+        <label><span data-i18n="dr.comment">Comment (goes in the legend)</span> <input id="fin-comment" type="text" placeholder=""></label>
+      </div>
+      <div id="dr-line-opts" hidden>
+        <label class="inline"><span data-i18n="line">Line</span> <select id="sk-style"><option value="solid" data-i18n="solid">solid</option><option value="dashed" data-i18n="dashed">dashed</option><option value="dotted" data-i18n="dotted">dotted</option></select></label>
+      </div>
+      <div class="row">
+        <button id="btn-dr-cancel" class="ghost" data-i18n="cancel">Cancel</button>
+        <button id="btn-dr-close" class="primary big" data-i18n="dr.close">Close region / end line</button>
+      </div>
+      <div class="scroll"><table id="fin-table"><thead><tr><th>#</th><th data-i18n="dr.kind">Finish</th><th data-i18n="dr.strokes_s">/10cm</th><th data-i18n="dr.comment_s">Comment</th><th></th></tr></thead><tbody></tbody></table>
+      <ul id="sketch-list" class="list"></ul></div>
+    </div>
+
+    <!-- 6 export -->
+    <div class="pane" data-pane="export" hidden>
+      <h2 data-i18n="ex.h">6. Export</h2>
+      <div class="grid2">
+        <a class="button primary big" id="exp-pdf" download>PDF</a>
+        <a class="button primary big" id="exp-png" download data-i18n="ex.png">Image (PNG)</a>
+        <a class="button" id="exp-jpg" download data-i18n="ex.jpg">Image (JPEG)</a>
+        <a class="button" id="exp-dxf" download>DXF</a>
+        <a class="button" id="exp-svg" download>SVG</a>
+        <a class="button" id="exp-csv" download>CSV</a>
+      </div>
+      <div class="row small muted">
+        <a id="exp-pdf-a4" download>PDF A4</a> · <a id="exp-pdf-a3" download>PDF A3</a> · <a id="exp-dxf12" class="flask-only" download>DXF R12</a> · <a id="exp-svg-photo" download data-i18n="ex.svgphoto">SVG + photo</a> · <a id="exp-json" download>JSON</a>
+      </div>
+      <h3 data-i18n="ex.tb">Title block</h3>
+      <div class="row">
+        <label><span data-i18n="tb.project">Project</span> <input class="tb" data-tb="project" type="text"></label>
+        <label><span data-i18n="tb.element">Element</span> <input class="tb" data-tb="element" type="text"></label>
+      </div>
+      <div class="row">
+        <label><span data-i18n="tb.material">Stone</span> <input class="tb" data-tb="material" type="text"></label>
+        <label><span data-i18n="tb.quantity">Quantity</span> <input class="tb" data-tb="quantity" type="text"></label>
+      </div>
+      <div class="row">
+        <label><span data-i18n="tb.finish">Finish (general)</span> <input class="tb" data-tb="finish" type="text"></label>
+        <label><span data-i18n="tb.drawn_by">Drawn by</span> <input class="tb" data-tb="drawn_by" type="text"></label>
+      </div>
+      <label><span data-i18n="tb.notes">Notes</span> <input class="tb" data-tb="notes" type="text"></label>
+      <label><span data-i18n="ex.name">Drawing name</span> <input id="proj-name" type="text"></label>
+      <details><summary data-i18n="ex.views">Other views of this element on the same sheet</summary>
+        <p class="tip" data-i18n="ex.viewsp">A side view, profile or top view is another project (another photo of the same element). Link it here; it is drawn next to this view under the same title block.</p>
+        <div class="row">
+          <select id="view-project"></select>
+          <select id="view-name"><option value="side" data-i18n="view.side">Side view</option><option value="profile" data-i18n="view.profile">Profile</option><option value="top" data-i18n="view.top">Top view</option><option value="back" data-i18n="view.back">Back view</option></select>
+          <button id="btn-view-add" class="ghost" data-i18n="add">Add</button>
+        </div>
+        <ul id="view-list" class="list"></ul>
+      </details>
+      <img id="export-preview" alt="">
+    </div>
+  </aside>
+</main>
+
+<div id="toast" hidden></div>
+<script src="shim.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

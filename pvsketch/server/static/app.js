@@ -22,6 +22,7 @@
     "dr.region": "Bewerkingsvlak", "dr.line": "Lijn", "dr.arrow": "Pijl + tekst", "dr.text": "Tekst", "dr.kind": "Bewerking", "dr.strokes": "Slagen per 10 cm", "dr.strokes_s": "/10cm", "dr.angle": "Richting °", "dr.width": "Band mm", "dr.comment": "Opmerking (komt in de legenda)", "dr.comment_s": "Opmerking", "cancel": "Annuleren", "dr.close": "Vlak sluiten / lijn beëindigen",
     "ex.h": "6. Exporteren", "ex.png": "Afbeelding (PNG)", "ex.jpg": "Afbeelding (JPEG)", "ex.svgphoto": "SVG + foto", "ex.tb": "Titelblok", "ex.name": "Tekeningnaam", "tb.project": "Project", "tb.element": "Element", "tb.material": "Steensoort", "tb.quantity": "Aantal", "tb.finish": "Afwerking (algemeen)", "tb.drawn_by": "Getekend door", "tb.notes": "Opmerkingen",
     "ex.views": "Andere aanzichten van dit element op hetzelfde blad", "ex.viewsp": "Een zijaanzicht, profiel of bovenaanzicht is een ander project (een andere foto van hetzelfde element). Koppel het hier; het wordt naast dit aanzicht getekend onder hetzelfde titelblok.",
+    "photo.import": "Project openen (.json)", "photo.storage": "Projecten staan op dit apparaat, in de browser. Maak een back-up via Exporteren → JSON, of installeer de app via Delen → Zet op beginscherm.",
     "view.side": "Zijaanzicht", "view.profile": "Profiel", "view.top": "Bovenaanzicht", "view.back": "Achteraanzicht", "add": "Toevoegen",
     // dynamic
     "Upload a photo to begin": "Maak of kies een foto om te beginnen", "Uploading…": "Uploaden…", "Photo loaded": "Foto geladen", "Working…": "Bezig…",
@@ -37,7 +38,7 @@
     "Sample loaded": "Voorbeeld geladen", "No projects yet": "Nog geen projecten", "outlined": "omtrek", "isolated": "geïsoleerd", "photo": "foto", "dims": "maten",
     "Text": "Tekst", "A region needs at least 3 points": "Een vlak heeft minstens 3 punten nodig", "auto": "auto", "Measure": "Meten", "Now measure": "Meet nu", "type the value": "typ de maat", "not on photo": "niet op de foto",
     "Not to scale yet: type the first measurement": "Nog niet op schaal: voer de eerste maat in", "Scale set by": "Schaal bepaald door", "use as scale": "als schaal", "Use this dimension as the scale of the drawing?": "Deze maat als schaal van de tekening gebruiken?",
-    "Value for": "Maat voor", "Scale set": "Schaal bepaald",
+    "Project imported": "Project geopend", "Value for": "Maat voor", "Scale set": "Schaal bepaald",
     "Side view": "Zijaanzicht", "Profile": "Profiel", "Top view": "Bovenaanzicht", "Back view": "Achteraanzicht",
   };
   let LANG = (() => { try { return localStorage.getItem("pvsketch.lang") || "nl"; } catch (_) { return "nl"; } })();
@@ -115,7 +116,19 @@
   const scaled = () => !!(S.project && S.project.calibration && S.project.calibration.scaled);
   const pid = () => S.project.id;
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
-  const loadImage = (url) => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url; });
+  // images go through fetch so they also work when the engine runs in the browser (no network round trip)
+  const loadImage = async (url) => {
+    const r = await fetch(url); if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    const objUrl = URL.createObjectURL(await r.blob());
+    return new Promise((res, rej) => { const im = new Image(); im.onload = () => { URL.revokeObjectURL(objUrl); res(im); }; im.onerror = rej; im.src = objUrl; });
+  };
+  async function setPreview() {
+    try {
+      const r = await fetch(`/api/projects/${pid()}/image/preview?t=${Date.now()}`); if (!r.ok) return;
+      const el = $("#export-preview"); if (el.dataset.url) URL.revokeObjectURL(el.dataset.url);
+      el.dataset.url = URL.createObjectURL(await r.blob()); el.src = el.dataset.url;
+    } catch (_) { /* preview is optional */ }
+  }
 
   async function showImage(kind) {
     if (!S.project) return;
@@ -476,6 +489,13 @@
   $("#btn-projects").onclick = () => goStep("photo");
   $("#file-input").onchange = (e) => upload(e.target.files[0]);
   $("#camera-input").onchange = (e) => upload(e.target.files[0]);
+  $("#btn-import").onclick = () => $("#import-input").click();
+  $("#import-input").onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { const st = await post("/api/projects/import", { text: await f.text() }); await openProject(st.id); toast(t("Project imported")); goStep(st.outline ? "measure" : st.segmentation ? "outline" : "isolate"); }
+    catch (err) { toast(err.message, true); }
+    e.target.value = "";
+  };
   $("#btn-sample").onclick = async () => {
     try { const st = await api("/api/projects/sample", { method: "POST" }); await openProject(st.id); toast(t("Sample loaded")); goStep("isolate"); }
     catch (e) { toast(e.message, true); }
@@ -854,7 +874,7 @@
     $("#exp-dxf").href = `${base}.dxf?${L}`; $("#exp-dxf12").href = `${base}.dxf?version=R12&${L}`;
     $("#exp-pdf").href = `${base}.pdf?${L}`; $("#exp-pdf-a4").href = `${base}.pdf?paper=a4&${L}`; $("#exp-pdf-a3").href = `${base}.pdf?paper=a3&${L}`;
     $("#exp-csv").href = `${base}.csv?${L}`; $("#exp-png").href = `${base}.png?photo=1&${L}`; $("#exp-jpg").href = `${base}.jpg?photo=1&${L}`; $("#exp-json").href = `${base}.json`;
-    $("#export-preview").src = `/api/projects/${pid()}/image/preview?t=${Date.now()}`;
+    setPreview();
   }
   async function renderViews() {
     const list = await api("/api/projects");

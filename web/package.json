@@ -1,0 +1,6 @@
+{
+  "name": "pvsketch-web",
+  "private": true,
+  "description": "Build-time dependency only: OpenCV.js is copied into cloudflare/vendor/ by tools/build_cloudflare.py",
+  "dependencies": { "@techstark/opencv-js": "5.0.0-release.1" }
+}

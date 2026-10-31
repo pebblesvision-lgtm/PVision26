@@ -8,3 +8,5 @@ out/
 build/
 dist/
 .pytest_cache/
+web/node_modules/
+_opencv_tmp.js

@@ -1,0 +1,20 @@
+const fs = require("fs"); const S = process.argv[2];
+const { loadEngine } = require("./harness.js");
+(async () => {
+  const PV = await loadEngine(S + "/njs/node_modules/@techstark/opencv-js");
+  const cv = PV.cv; const meta = JSON.parse(fs.readFileSync(S + "/sample.json")); const ref = JSON.parse(fs.readFileSync(S + "/ref.json"));
+  const rgb = fs.readFileSync(S + "/sample.rgb"); const img = new cv.Mat(meta.h, meta.w, cv.CV_8UC3); img.data.set(rgb);
+  let t = Date.now(); const mask = PV.segment.grabcut(img, { polygon: meta.polygon, bandPx: 25, iters: 5, strokes: [] });
+  let n = 0; for (const v of mask.data) if (v) n++;
+  console.log("grabcut ms", Date.now() - t, "mask px", n, "py", ref.mask_px);
+  const ppm = ref.ppm; t = Date.now();
+  const prims = PV.contour.extractOutline(mask, ppm, { epsilon_mm: 1.0, arc_fit: true });
+  console.log("outline ms", Date.now() - t, prims.map((p) => p.type === "arc" ? ["arc", +p.radius.toFixed(1)] : ["polyline", p.points.length]).join(" | "));
+  console.log("py   prims ", ref.prims.map((p) => p.join(":")).join(" | "));
+  const bb = PV.geo.outlineBBox(prims); console.log("bbox js", bb.map((v) => +v.toFixed(1)), "py", ref.bbox.map((v) => +v.toFixed(1)));
+  t = Date.now(); const det = PV.contour.detailLines(img, mask, ppm, { low: 30, high: 90, min_len_mm: 15, smooth: 5, inset_mm: 3 });
+  console.log("detail ms", Date.now() - t, det.map((p) => Math.round(PV.geo.polylineLength(p))), "py", ref.detail);
+  const h = PV.hatch.finishHatch([[0, 0], [160, 0], [160, 90], [0, 90]], "kathedraal", null, 12.5, null);
+  console.log("kathedraal lines", h.lines.length);
+  process.exit(0);
+})().catch((e) => { console.error(e); process.exit(1); });

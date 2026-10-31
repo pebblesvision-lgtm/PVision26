@@ -93,3 +93,5 @@ label.inline select { width: auto; margin: 0; }
   #settings .muted { display: block; }
 }
 @media (pointer: coarse) { nav#steps .step { min-height: 48px; } }
+
+.static-only { display: none; } body.static-app .static-only { display: block; } body.static-app .flask-only { display: none; }

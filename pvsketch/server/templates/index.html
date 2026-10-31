@@ -51,6 +51,11 @@
         <button id="btn-camera" class="primary big" data-i18n="photo.camera">Take a photo</button>
         <button id="btn-sample" class="ghost" data-i18n="photo.sample">Sample photo</button>
       </div>
+      <div class="static-only">
+        <button id="btn-import" class="ghost" style="width:100%" data-i18n="photo.import">Open project (.json)</button>
+        <input type="file" id="import-input" accept=".json,application/json" hidden>
+        <p class="tip small" data-i18n="photo.storage">Projects are stored on this device, in the browser. Back up via Export → JSON, or install the app via Share → Add to Home Screen.</p>
+      </div>
       <h3 data-i18n="photo.recent">Recent projects</h3>
       <ul id="project-list" class="list scroll"></ul>
     </div>
@@ -184,7 +189,7 @@
         <a class="button" id="exp-csv" download>CSV</a>
       </div>
       <div class="row small muted">
-        <a id="exp-pdf-a4" download>PDF A4</a> · <a id="exp-pdf-a3" download>PDF A3</a> · <a id="exp-dxf12" download>DXF R12</a> · <a id="exp-svg-photo" download data-i18n="ex.svgphoto">SVG + photo</a> · <a id="exp-json" download>JSON</a>
+        <a id="exp-pdf-a4" download>PDF A4</a> · <a id="exp-pdf-a3" download>PDF A3</a> · <a id="exp-dxf12" class="flask-only" download>DXF R12</a> · <a id="exp-svg-photo" download data-i18n="ex.svgphoto">SVG + photo</a> · <a id="exp-json" download>JSON</a>
       </div>
       <h3 data-i18n="ex.tb">Title block</h3>
       <div class="row">

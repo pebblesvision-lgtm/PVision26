@@ -51,7 +51,28 @@ De omtrek is de vorm zoals de camera hem zag. Fotografeer daarom **recht van
 voren**; een scheve foto geeft een scheve tekening. De getypte maten zijn
 altijd leidend; de tekening is de drager van die maten.
 
-## Als webapp (testen op een tablet)
+## Op Cloudflare Pages zetten (aanbevolen: gratis, werkt ook offline)
+
+De map `cloudflare/` (en `pvsketch-cloudflare-pages.zip`, dezelfde inhoud) is de
+complete webapp. Er draait geen server: de omtrek- en exportcode draait in de
+browser (JavaScript + OpenCV.js in een Web Worker), projecten staan op het
+apparaat zelf (IndexedDB). Na het eerste bezoek werkt de app zonder internet.
+
+1. <https://dash.cloudflare.com> → **Workers & Pages** → **Create** → tabblad **Pages** → **Upload assets** (Direct Upload).
+2. Projectnaam kiezen (bv. `pvsketch`), dan de **map `cloudflare`** (of de zip) naar het venster slepen → **Deploy**.
+3. Open de gegeven URL (`https://pvsketch.pages.dev`). Op de iPad: Delen → **Zet op beginscherm**, dan opent hij schermvullend en blijft hij offline beschikbaar.
+4. Eigen domein: Pages-project → Custom domains. Inloggen vooraf: Zero Trust → Access → Applications.
+
+Een nieuwe versie uploaden = opnieuw slepen (Deployments → Create new deployment).
+
+Goed om te weten:
+
+- Projecten staan **in de browser van dat apparaat**. Maak een back-up via Exporteren → JSON (bevat foto, omtrek, maten en bewerkingen) en open die met *Project openen (.json)*; zo verhuist u ook een project naar een ander apparaat.
+- Safari kan data van sites die u lang niet gebruikt opruimen; installeren op het beginscherm voorkomt dat grotendeels.
+- DXF is hier R12 (werkt in vrijwel elk CAD/CAM-pakket, maatlijnen als losse lijnen en tekst).
+- Bouwen: `python tools/build_cloudflare.py` (alleen nodig na wijzigingen aan de code; het haalt OpenCV.js via `npm install` in `web/`). Test: `python3 -m http.server 5077` in `cloudflare/`, dan `node web/tests/drive_static.js`.
+
+## Als serverapp (Python, optioneel)
 
 Dezelfde app draait op een server. Zet `PVSKETCH_PASSWORD` (wachtwoord op
 alle pagina's) en `PVSKETCH_RETENTION_DAYS` (oude projecten opruimen).
@@ -88,6 +109,10 @@ pvsketch/
   i18n.py        teksten op de tekening (nl/en) en namen van bewerkingen
   project.py     projectmap: original, rectified.jpg, mask.png, project.json
   server/        Flask-API + één-pagina-UI (vanilla JS, geen CDN, offline)
+web/engine/      dezelfde pijplijn in JavaScript voor de Cloudflare-versie (OpenCV.js)
+web/worker.js, shim.js, sw.js   Web Worker, /api-naar-browser-brug, offline-cache
+tools/build_cloudflare.py       bouwt cloudflare/ + zip
+cloudflare/      de upload-klare webapp
   __main__.py    serve / run / export
 samples/make_sample.py   synthetische testfoto
 tests/test_pipeline.py   python -m unittest
