@@ -98,7 +98,6 @@ def fit_lines_and_arcs(dense: np.ndarray, vertices_idx: np.ndarray, tol: float,
     n = len(vertices_idx)
     if n < 3:
         return [Polyline(points=[_pt(dense[i]) for i in vertices_idx], closed=True)]
-    N = len(dense)
 
     def run(i_idx: int, j_idx: int) -> np.ndarray:
         a, b = vertices_idx[i_idx % n], vertices_idx[j_idx % n]

@@ -9,7 +9,7 @@ from xml.sax.saxutils import escape
 import cv2
 import numpy as np
 
-from .geometry import Arc, Drawing, Polyline, dimension_geometry, outline_loops, primitive_points, sample_arc
+from .geometry import Arc, Drawing, Polyline, dimension_geometry, outline_loops, primitive_points
 from .i18n import finish_name, t as tr
 
 DASH = {"solid": "", "dashed": "3 1.5", "dotted": "0.6 1.2"}

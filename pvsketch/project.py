@@ -433,7 +433,8 @@ class Project:
                 v = c.get("value_mm")
                 cl.append({"key": str(c["key"])[:40], "nl": str(c.get("nl", ""))[:80], "en": str(c.get("en", ""))[:80],
                            "kind": c.get("kind") if c.get("kind") in ("horizontal", "vertical", "aligned", "value") else "value",
-                           "hint": str(c.get("hint", ""))[:120],
+                           "hint": str(c.get("hint", ""))[:120], "hint_nl": str(c.get("hint_nl", c.get("hint", "")))[:120],
+                           "hint_en": str(c.get("hint_en", c.get("hint", "")))[:120],
                            "value_mm": (None if v in (None, "") else float(v)), "dim_id": str(c.get("dim_id", ""))[:8]})
             self.state["checklist"] = cl
         if sketches is not None:

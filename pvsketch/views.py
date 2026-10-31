@@ -8,8 +8,6 @@ name, under one title block.
 """
 from __future__ import annotations
 
-from typing import Any
-
 from .geometry import Arc, Dimension, Drawing, Finish, Label, Polyline, Sketch
 
 GAP_MM = 40.0

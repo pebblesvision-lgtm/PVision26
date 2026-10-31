@@ -128,7 +128,9 @@ lie **in the same plane**.
 | 6 Draw | **Finish regions** (bewerkingen) and free lines | Click a polygon on the face and pick the finish: gefrijnd, gescharreerd, gegradineerd, gebouchardeerd, gespitst, randslag, gezoet, gepolijst, gezaagd, gevlamd, geschuurd. It is hatched with the matching pattern (direction and spacing adjustable), labelled F1…Fn and listed in the title block. Lines/arrows/leader text in solid, dashed or dotted |
 | 7 Export | Link other projects as **views** (side, profile, top, back): they are drawn next to this one, tops aligned, under one title block. Then DXF 2010, DXF R12, SVG, **PDF at true scale** (A4/A3 auto, 1:2 / 1:5 when it doesn't fit), CSV of measurements, PNG, JSON | All in mm. DXF: layers `OUTLINE`, `DETAIL`, `DIM`, `TEXT`, `$INSUNITS` = mm. R12 uses POLYLINE and exploded dimensions for old CAM/CAD software |
 
-Viewer: wheel = zoom, right-drag (or shift-drag) = pan, `f` = fit, `Esc` = cancel,
+Viewer: wheel = zoom, right-drag (or shift-drag) = pan, `f` = fit, `Esc` = cancel.
+On a phone or tablet: one finger = the tool, two fingers = pinch zoom and pan,
+plus the + − ⌖ buttons top right of the image.
 Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z redo. Isolate shortcuts: `p` points, `b` box,
 `s` stone brush, `g` background brush, `e` eraser, Backspace removes the last point.
 
@@ -223,4 +225,5 @@ dimension registration and CAD export.
 - One plane per calibration. For a return or a second face, take a second photo.
 - GrabCut needs some colour/texture contrast between stone and background; use the brushes when it fails.
 - Detail lines are a visual aid, not geometry you should machine from.
-- HEIC photos from iPhones must be converted to JPEG first.
+- HEIC photos from iPhones are read through `pillow-heif` (in requirements). If that
+  package fails to install on your machine, convert to JPEG first.

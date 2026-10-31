@@ -4,3 +4,4 @@ flask>=3.0
 ezdxf>=1.1
 pillow>=10.0
 gunicorn>=21
+pillow-heif>=0.18

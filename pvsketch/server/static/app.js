@@ -48,7 +48,7 @@
     "photo.marker": "Beste referentie: het <a href=\"/api/board/a3.pdf\">A3-markerbord</a> (of <a href=\"/api/board/a4.pdf\">A4</a>). Print op 100%, controleer de 100 mm-balk met een duimstok, plak het vlak op foamboard. Leg het op het steenvlak; het wordt automatisch herkend. Een losse <a href=\"/api/marker/0.png?size_mm=100\">marker van 100 mm</a> of een A4-vel werkt ook.",
     "Lay the whole marker board flat on the stone face, in focus. Press Calibrate: the markers are found automatically.": "Leg het hele markerbord plat op het steenvlak, scherp in beeld. Druk op <b>Kalibreren</b>: de markers worden automatisch gevonden.",
     "lens.h": "Cameralensprofiel (haalt tonvormige vertekening weg)", "lens.p": "Telefoonlenzen buigen rechte randen aan de rand van het beeld. Print het <a href=\"/api/checkerboard.pdf\">schaakbord</a>, fotografeer het 8-12 keer vanuit verschillende hoeken en afstanden met de lens die u voor steenfoto's gebruikt (nooit de 0,5x groothoek), upload ze hier. Het profiel wordt automatisch toegepast op latere foto's van dezelfde camera.", "lens.name": "Profielnaam", "lens.create": "Profiel maken", "lens.use": "Lensprofiel voor deze foto",
-    "profile created": "profiel gemaakt", "images used": "foto's gebruikt", "reprojection error": "herprojectiefout", "Lens profile applied; calibrate again.": "Lensprofiel toegepast; kalibreer opnieuw.",
+    "upload at least 4 checkerboard photos (8-12 is better)": "upload minstens 4 schaakbordfoto's (8-12 is beter)", "profile created": "profiel gemaakt", "images used": "foto's gebruikt", "reprojection error": "herprojectiefout", "Lens profile applied; calibrate again.": "Lensprofiel toegepast; kalibreer opnieuw.",
     "ex.views": "Andere aanzichten van dit element op hetzelfde blad", "ex.viewsp": "Een zijaanzicht, profiel of bovenaanzicht is een ander project (een andere foto van hetzelfde element). Koppel het hier; het wordt naast dit aanzicht getekend, bovenkanten gelijk, met hetzelfde titelblok.",
     "view.side": "Zijaanzicht", "view.profile": "Profiel", "view.top": "Bovenaanzicht", "view.back": "Achteraanzicht", "add": "Toevoegen",
     "iso.smart": "Slim selecteren (AI)", "iso.smartp": "Klik op de steen (links) en op de achtergrond (Alt+klik), dan Uitvoeren. Het model zoekt de rand; GrabCut wordt niet gebruikt.",
@@ -836,7 +836,8 @@
       tr.className = (done ? "done " : "") + (S.armed === i ? "armed" : "");
       const name = LANG === "nl" ? c.nl : c.en;
       const kindTxt = c.kind === "value" ? t("type the value") : c.kind;
-      tr.innerHTML = `<td>${name}<div class="hint">${c.hint || ""} ${c.kind === "value" ? "· " + t("not on photo") : ""}</div></td>
+      const hint = LANG === "nl" ? (c.hint_nl ?? c.hint ?? "") : (c.hint_en ?? c.hint ?? "");
+      tr.innerHTML = `<td>${name}<div class="hint">${hint} ${c.kind === "value" ? "· " + t("not on photo") : ""}</div></td>
         <td>${dim ? `<b>${fmt(dimValue(dim))}</b> <span class="muted">${c.dim_id}</span>` : `<input type="number" step="0.5" value="${c.value_mm ?? ""}" placeholder="${kindTxt}">`}</td>
         <td>${c.kind !== "value" && !dim ? `<button class="ghost arm">${t("Measure")}</button>` : ""}</td>`;
       const inp = tr.querySelector("input");
@@ -970,23 +971,63 @@
   };
 
   // --------------------------------------------------------- interaction ----
+  function zoomAt(sx, sy, f) {
+    const ns = Math.min(40, Math.max(0.02, S.view.scale * f));
+    S.view.tx = sx - (sx - S.view.tx) * (ns / S.view.scale); S.view.ty = sy - (sy - S.view.ty) * (ns / S.view.scale); S.view.scale = ns;
+    draw();
+  }
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   canvas.addEventListener("wheel", (e) => {
     if (!S.img) return; e.preventDefault();
     const [sx, sy] = evtPos(e);
-    const f = Math.exp(-e.deltaY * 0.0015);
-    const ns = Math.min(40, Math.max(0.02, S.view.scale * f));
-    S.view.tx = sx - (sx - S.view.tx) * (ns / S.view.scale); S.view.ty = sy - (sy - S.view.ty) * (ns / S.view.scale); S.view.scale = ns;
-    draw();
+    zoomAt(sx, sy, Math.exp(-e.deltaY * 0.0015));
   }, { passive: false });
+  const centre = () => { const r = canvas.getBoundingClientRect(); return [r.width / 2, r.height / 2]; };
+  $("#btn-zoom-in").onclick = () => { if (S.img) zoomAt(...centre(), 1.4); };
+  $("#btn-zoom-out").onclick = () => { if (S.img) zoomAt(...centre(), 1 / 1.4); };
+  $("#btn-fit").onclick = () => { if (S.img) { fitView(); draw(); } };
+
+  // ---- touch: one finger = the tool, two fingers = pinch zoom / pan ----
+  const touches = new Map();          // pointerId -> [sx, sy]
+  let pinch = null;                   // {d0, mid0, view0}
+  let touchIgnore = false;            // after a pinch, ignore the finger that stays down
+  function cancelInProgress() {
+    const g = S.seg;
+    if (g.stroke) g.stroke = null;
+    if (g.drag) g.drag = null;
+    if (g.dragPoint != null) { if (g.dragPoint === g.polygon.length - 1 && g.justAdded) g.polygon.pop(); g.dragPoint = null; }
+    g.justAdded = false;
+    S.edit.drag = null; S.measure.dragDim = null; S.measure.pending = null;
+    S.panning = null;
+  }
+  function pinchStart() {
+    const [a, b] = Array.from(touches.values());
+    pinch = { d0: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, mid0: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], view0: { ...S.view } };
+  }
+  function pinchMove() {
+    const [a, b] = Array.from(touches.values());
+    const d = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const f = Math.min(40, Math.max(0.02, pinch.view0.scale * d / pinch.d0)) / pinch.view0.scale;
+    const ns = pinch.view0.scale * f;
+    // keep the point under the initial midpoint fixed, then translate by the midpoint drift
+    S.view.scale = ns;
+    S.view.tx = pinch.mid0[0] - (pinch.mid0[0] - pinch.view0.tx) * f + (mid[0] - pinch.mid0[0]);
+    S.view.ty = pinch.mid0[1] - (pinch.mid0[1] - pinch.view0.ty) * f + (mid[1] - pinch.mid0[1]);
+    draw();
+  }
   canvas.addEventListener("dblclick", (e) => {
     if (S.step === "outline" && S.outlineTool === "edit" && S.drawing) { const [sx, sy] = evtPos(e); insertVertexAt(screenToMm(sx, sy)); }
     if (S.step === "draw" && S.draw.pts.length) { S.draw.pts.pop(); /* the dblclick's own second click */ finishDrawShape(); }
   });
   canvas.addEventListener("pointerdown", (e) => {
     if (!S.img) return;
-    canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* synthetic or already-released pointer */ }
     const [sx, sy] = evtPos(e);
+    if (e.pointerType === "touch") {
+      touches.set(e.pointerId, [sx, sy]);
+      if (touches.size === 2) { cancelInProgress(); pinchStart(); return; }
+      if (touches.size > 2 || touchIgnore) return;
+    }
     const interactive = ["calibrate", "isolate", "measure", "draw"].includes(S.step) || (S.step === "outline" && S.outlineTool === "edit");
     if (e.button === 1 || e.button === 2 || e.shiftKey || !interactive) { S.panning = { sx, sy, tx: S.view.tx, ty: S.view.ty }; return; }
     const ip = toImg(sx, sy);
@@ -1001,7 +1042,7 @@
         const tol = 9 / S.view.scale; let hit = -1;
         g.polygon.forEach((p, i) => { if (dist(p, ip) < tol) hit = i; });
         segHist.snap();
-        if (hit >= 0) g.dragPoint = hit; else { g.polygon.push(ip); g.dragPoint = g.polygon.length - 1; }
+        if (hit >= 0) { g.dragPoint = hit; g.justAdded = false; } else { g.polygon.push(ip); g.dragPoint = g.polygon.length - 1; g.justAdded = true; }
       } else if (g.tool === "box") { g.drag = [ip[0], ip[1], 0, 0]; g.dragStart = ip; }
       else if (g.tool === "smart") { segHist.snap(); (e.altKey ? g.smartBg : g.smartFg).push(ip); }
       else g.stroke = { kind: g.tool, pts: [ip], r: +$("#brush-size").value };
@@ -1042,6 +1083,11 @@
   canvas.addEventListener("pointermove", (e) => {
     if (!S.img) return;
     const [sx, sy] = evtPos(e);
+    if (e.pointerType === "touch" && touches.has(e.pointerId)) {
+      touches.set(e.pointerId, [sx, sy]);
+      if (pinch && touches.size >= 2) { pinchMove(); return; }
+      if (touchIgnore) return;
+    }
     const ip = toImg(sx, sy);
     if (S.panning) { S.view.tx = S.panning.tx + (sx - S.panning.sx); S.view.ty = S.panning.ty + (sy - S.panning.sy); draw(); return; }
     const inRect = S.imgKind !== "original" && S.project && S.project.calibration;
@@ -1062,7 +1108,12 @@
       if (S.draw.pts.length) { S.draw.hover = snapPoint(screenToMm(sx, sy)).p; draw(); }
     }
   });
-  const endPointer = () => {
+  const endPointer = (e) => {
+    if (e && e.pointerType === "touch") {
+      touches.delete(e.pointerId);
+      if (pinch) { pinch = null; touchIgnore = touches.size > 0; return; }
+      if (touchIgnore) { touchIgnore = touches.size > 0; return; }
+    }
     if (S.panning) { S.panning = null; return; }
     if (S.step === "isolate") {
       const g = S.seg;

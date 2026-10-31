@@ -43,7 +43,8 @@ def available(root: str) -> bool:
     if not (os.path.isfile(os.path.join(d, ENCODER)) and os.path.isfile(os.path.join(d, DECODER))):
         return False
     try:
-        import onnxruntime  # noqa: F401
+        import importlib
+        importlib.import_module("onnxruntime")
     except ImportError:
         return False
     return True

@@ -11,7 +11,6 @@ each corner inset by ``margin``; ids 0,1,2,3 = TL, TR, BR, BL.
 from __future__ import annotations
 
 import math
-import zlib
 from typing import Any
 
 import cv2

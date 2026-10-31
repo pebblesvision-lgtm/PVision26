@@ -2,7 +2,6 @@
 R90 corners, photographed obliquely next to an A4 sheet."""
 from __future__ import annotations
 
-import json
 import math
 import os
 import sys
@@ -245,6 +244,62 @@ class PipelineTest(unittest.TestCase):
         p2 = Project.load(self.project.id, root=os.path.join(self.tmp.name, "ws"))
         self.assertEqual(p2.state["outline"], self.project.state["outline"])
         self.assertIsNotNone(p2.mask())
+
+
+class SmartSelectTest(unittest.TestCase):
+    """Runs only when onnx + onnxruntime are installed: builds stub models with
+    the SAM ONNX interface and pushes an image through SmartSelector."""
+
+    def test_stub_models_roundtrip(self):
+        try:
+            import importlib
+            import onnx
+            from onnx import TensorProto, helper, numpy_helper
+            importlib.import_module("onnxruntime")
+        except ImportError:
+            self.skipTest("onnx/onnxruntime not installed")
+        from pvsketch import segment_ai
+        with tempfile.TemporaryDirectory() as tmp:
+            d = os.path.join(tmp, "_models"); os.makedirs(d)
+            inp = helper.make_tensor_value_info("image", TensorProto.FLOAT, [1, 3, 1024, 1024])
+            out = helper.make_tensor_value_info("image_embeddings", TensorProto.FLOAT, [1, 256, 64, 64])
+            nodes = [helper.make_node("ReduceMean", ["image"], ["m"], axes=[1, 2, 3], keepdims=1),
+                     helper.make_node("Constant", [], ["shape"], value=numpy_helper.from_array(np.array([1, 256, 64, 64], np.int64))),
+                     helper.make_node("Expand", ["m", "shape"], ["image_embeddings"])]
+            enc = helper.make_model(helper.make_graph(nodes, "enc", [inp], [out]), opset_imports=[helper.make_opsetid("", 13)]); enc.ir_version = 8
+            onnx.save(enc, os.path.join(d, segment_ai.ENCODER))
+            yy, xx = np.mgrid[0:256, 0:256]; disc = (((xx - 128) ** 2 + (yy - 128) ** 2) < 60 ** 2).astype(np.float32) * 2 - 1
+            ins = [helper.make_tensor_value_info(n, TensorProto.FLOAT, sh) for n, sh in
+                   [("image_embeddings", [1, 256, 64, 64]), ("point_coords", [1, None, 2]), ("point_labels", [1, None]),
+                    ("mask_input", [1, 1, 256, 256]), ("has_mask_input", [1]), ("orig_im_size", [2])]]
+            outs = [helper.make_tensor_value_info("masks", TensorProto.FLOAT, [1, 1, 256, 256]),
+                    helper.make_tensor_value_info("iou_predictions", TensorProto.FLOAT, [1, 1])]
+            nodes = [helper.make_node("Constant", [], ["masks"], value=numpy_helper.from_array(disc[None, None])),
+                     helper.make_node("Constant", [], ["iou_predictions"], value=numpy_helper.from_array(np.array([[0.9]], np.float32)))]
+            dec = helper.make_model(helper.make_graph(nodes, "dec", ins, outs), opset_imports=[helper.make_opsetid("", 13)]); dec.ir_version = 8
+            onnx.save(dec, os.path.join(d, segment_ai.DECODER))
+            self.assertTrue(segment_ai.available(tmp))
+            sel = segment_ai.SmartSelector(tmp)
+            img = np.full((600, 900, 3), 120, np.uint8)
+            m = sel.mask("k", img, [[450, 300]], [[10, 10]])
+            self.assertEqual(m.shape, (600, 900)); self.assertEqual(m[300, 450], 255); self.assertEqual(m[5, 5], 0)
+            # through the API: the tool reports available and produces a mask
+            photo = os.path.join(tmp, "s.jpg"); truth = make(photo)
+            app = create_app_for_test(tmp)
+            c = app.test_client()
+            self.assertTrue(c.get("/api/ai").get_json()["smart_select"])
+            with open(photo, "rb") as f:
+                pid = c.post("/api/projects", data={"photo": (f, "s.jpg")}, content_type="multipart/form-data").get_json()["id"]
+            c.post(f"/api/projects/{pid}/calibrate", json={"mode": "quad", "sheet": "a4", "points": truth["a4_corners_px"]})
+            r = c.post(f"/api/projects/{pid}/smartselect", json={"fg": [[500, 400]]})
+            self.assertEqual(r.status_code, 200, r.data); self.assertGreater(r.get_json()["mask_px"], 0)
+            self.assertEqual(r.get_json()["state"]["segmentation"]["mode"], "smart")
+
+
+def create_app_for_test(tmp):
+    from pvsketch.server.app import create_app
+    app = create_app(workspace=tmp); app.testing = True
+    return app
 
 
 class ServerTest(unittest.TestCase):
