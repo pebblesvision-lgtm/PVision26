@@ -11,7 +11,7 @@ import ezdxf
 from ezdxf.enums import TextEntityAlignment
 
 from .geometry import Arc, Drawing, Polyline, dimension_geometry
-from .i18n import finish_name, t as tr
+from .i18n import t as tr
 
 LINETYPE = {"solid": "CONTINUOUS", "dashed": "DASHED", "dotted": "DOT"}
 
@@ -73,7 +73,7 @@ def drawing_to_dxf(dr: Drawing, path: str, with_dimensions: bool = True, version
             msp.add_line(Y(p), Y(q), dxfattribs={"layer": "FINISH"})
         for p in fd["hatch"]["dots"]:
             msp.add_circle(Y(p), radius=max(0.2, (f.spacing_mm or 4) * 0.12), dxfattribs={"layer": "FINISH"})
-        msp.add_text(f"F{i} {f.label or finish_name(f.kind, lang)}", height=3.0, dxfattribs={"layer": "TEXT"}).set_placement(
+        msp.add_text(f"F{i} {f.legend(lang)}", height=3.0, dxfattribs={"layer": "TEXT"}).set_placement(
             Y(fd["centroid"]), align=TextEntityAlignment.MIDDLE_CENTER)
     for sk in dr.sketches:
         polyline([Y(p) for p in sk.points], False, "SKETCH", LINETYPE.get(sk.style, "CONTINUOUS"))
@@ -136,6 +136,8 @@ def drawing_to_dxf(dr: Drawing, path: str, with_dimensions: bool = True, version
         if tb.get(key):
             head += f"  {tr(lang, key)}: {tb[key]}"
     note = f"pvsketch - {tr(lang, 'units')} - {dr.meta.get('calibration', '')} - {dr.meta.get('source', '')}"
+    if not dr.meta.get("scaled"):
+        note = tr(lang, "unscaled") + " - " + note
     bbox = dr.outline_bbox()
     tx, ty = (bbox[0], H - bbox[3] - 12) if bbox else (0, -12)
     if head.strip():

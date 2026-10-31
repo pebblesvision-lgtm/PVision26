@@ -181,12 +181,14 @@ def drawing_to_svg(dr: Drawing, background: np.ndarray | None = None, margin_mm:
             line1 += f"  -  {tr(lang, 'quantity')}: {escape(tb['quantity'])}"
         bb = f"{tr(lang, 'outline')} {bbox[2]-bbox[0]:.1f} x {bbox[3]-bbox[1]:.1f} mm" if bbox else ""
         line2 = f"{tr(lang, 'title')}  -  {date.today().isoformat()}  -  {bb}  -  {tr(lang, 'scale')} 1:1, {tr(lang, 'units')}"
+        if not dr.meta.get("scaled"):
+            line2 = f"{tr(lang, 'unscaled')}  -  " + line2
         line3 = f"{escape(str(info.get('calibration', '')))}  -  {tr(lang, 'source')} {escape(str(info.get('source', '')))}"
         if tb.get("drawn_by"):
             line3 += f"  -  {tr(lang, 'drawn_by')}: {escape(tb['drawn_by'])}"
         if tb.get("finish") or dr.finishes:
             leg = [escape(tb["finish"])] if tb.get("finish") else []
-            leg += [f"F{i} {escape(f.label or finish_name(f.kind, lang))}" for i, f in enumerate(dr.finishes, 1)]
+            leg += [f"F{i} {escape(f.legend(lang))}" for i, f in enumerate(dr.finishes, 1)]
             line3 += f"  -  {tr(lang, 'finishes')}: " + ", ".join(leg)
         parts.append(f'<g id="titleblock" font-size="{_fmt(font*0.8)}" fill="#000">'
                      f'<line x1="{_fmt(x0)}" y1="{_fmt(y1)}" x2="{_fmt(x1)}" y2="{_fmt(y1)}" stroke="#000" stroke-width="0.3"/>'
@@ -262,6 +264,8 @@ def drawing_to_png(dr: Drawing, px_per_mm: float = 4.0, background: np.ndarray |
         cv2.circle(img, q1, 3, (0, 0, 200), -1); cv2.circle(img, q2, 3, (0, 0, 200), -1)
         m = ((q1[0] + q2[0]) // 2, (q1[1] + q2[1]) // 2 - 6)
         cv2.putText(img, f"D{i} {g['text']}", m, cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 200), 1, cv2.LINE_AA)
+    if not dr.meta.get("scaled"):
+        cv2.putText(img, "NIET OP SCHAAL / NOT TO SCALE", (10, H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 200), 2, cv2.LINE_AA)
     for lb in dr.labels:
         cv2.putText(img, lb.text, P(lb.pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 100, 0), 1, cv2.LINE_AA)
     return img

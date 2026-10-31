@@ -195,7 +195,9 @@ def drawing_to_pdf(dr: Drawing, paper: str = "auto", margin_mm: float = 15.0) ->
         + (f"  -  {tr(lang, 'drawn_by')}: {tb['drawn_by']}" if tb.get("drawn_by") else "")
         + f"  -  {tr(lang, 'print')}",
     ]
-    leg = ([str(tb["finish"])] if tb.get("finish") else []) + [f"F{i} {f.label or finish_name(f.kind, lang)}" for i, f in enumerate(dr.finishes, 1)]
+    leg = ([str(tb["finish"])] if tb.get("finish") else []) + [f"F{i} {f.legend(lang)}" for i, f in enumerate(dr.finishes, 1)]
+    if not dr.meta.get("scaled"):
+        lines.insert(1, tr(lang, "unscaled"))
     if leg:
         lines.append(f"{tr(lang, 'finishes')}: " + ", ".join(leg))
     if tb.get("notes"):
@@ -204,9 +206,8 @@ def drawing_to_pdf(dr: Drawing, paper: str = "auto", margin_mm: float = 15.0) ->
         size = 3.4 if k == 0 else 2.8
         c.append(f"BT /F1 {_f(size*PT)} Tf 0 g {_f(m + 2*PT)} {_f(m + (title_h - 5 - 4.3*k)*PT)} Td ({_esc(line)}) Tj ET")
     # measurement table (right part of title block): dimensions + typed checklist values
-    rows = [f"D{k+1} {d.label or ''}: {d.value_mm:.1f}" + (f" / {d.auto_mm:.1f}" if d.manual_mm is not None else "") + " mm"
-            for k, d in enumerate(dr.dimensions)]
-    rows += [f"{name}: {v:.1f} mm" for name, v in dr.typed_values()]
+    rows = [f"D{k+1} {d.label or ''}: " + (f"{d.manual_mm:g} mm" if d.manual_mm is not None else "?") for k, d in enumerate(dr.dimensions)]
+    rows += [f"{name}: {v:g} mm" for name, v in dr.typed_values()]
     if rows:
         col = pw * PT * 0.56
         c.append(f"BT /F1 {_f(2.6*PT)} Tf 0 g {_f(col)} {_f(m + (title_h - 5)*PT)} Td ({_esc(tr(lang, 'measurements'))}) Tj ET")

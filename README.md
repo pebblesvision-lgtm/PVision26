@@ -1,229 +1,101 @@
-# pvsketch — photo to true-scale production outline (offline)
+# pvsketch — productietekening uit een foto, maten typt u zelf
 
-Turns a photo of a stone element into a **clean outer contour at real scale in
-millimetres**, exported as **SVG and DXF**, with a click-to-measure overlay on
-which hand-measured values are registered. Built for restoration work: the aim
-is a production drawing you can put dimensions on, not a pencil-sketch effect.
+Een foto van een natuursteenelement wordt een **schone omtrek** (lijnen en
+cirkelbogen), waarop u de **zelf gemeten maten** registreert, bewerkingen
+(gefrijnd, gescharreerd, kathedraalslag, randslag, …) aangeeft en het geheel
+exporteert als **PDF, afbeelding, DXF, SVG of CSV**. Er wordt **niets uit de
+foto gemeten**: de foto geeft alleen de vorm, de eerste maat die u intypt
+bepaalt de schaal van de tekening.
 
-Everything runs locally. No model downloads, no cloud calls.
+Alles draait lokaal; geen modellen, geen cloud. Nederlands standaard, English
+via het tandwiel. Gemaakt voor gebruik op een tablet op de steiger: alles op
+één scherm, grote knoppen, twee vingers = zoom.
 
 ```
-photo ──► 1 calibrate ──► 2 isolate ──► 3 outline ──► 4 measure ──► SVG / DXF (mm)
-          (A4 / marker)   (GrabCut)     (lines+arcs)  (register tape values)
+foto ──► 2 isoleren ──► 3 omtrek ──► 4 opmeten ──► 5 tekenen ──► 6 exporteren
+         (punten)       (lijnen+bogen) (typen)     (bewerkingen)  (PDF/PNG/DXF/SVG/CSV)
 ```
 
-## Quick start
+## Starten
 
 ```bash
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+python3 -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python -m pvsketch serve
 ```
 
-Open <http://127.0.0.1:5000>. Projects are stored in `./workspace/` (override
-with `--workspace DIR` or `PVSKETCH_WORKSPACE`).
+Open <http://127.0.0.1:5000>. Projecten staan in `./workspace/` (anders:
+`--workspace MAP` of `PVSKETCH_WORKSPACE`). "Voorbeeldfoto" op het eerste
+scherm laadt een synthetische teststeen.
 
-Try it without a real stone first:
+## De stappen
 
-```bash
-python samples/make_sample.py samples/sample.jpg
-```
-
-then upload `samples/sample.jpg`: it is a synthetic 300 × 180 mm stone with
-R90 corners and a 40 mm notch next to an A4 sheet, seen obliquely.
-
-## Run it as a web app (for testing from any device)
-
-The same app runs on a server; nothing changes except the launcher. Set
-`PVSKETCH_PASSWORD` so only you can reach it (any user name, that password),
-and `PVSKETCH_RETENTION_DAYS` so test projects are pruned.
-
-**Render.com, free, from this repository (about 5 minutes):**
-
-1. Sign in at <https://render.com> with your GitHub account.
-2. *New +* → *Blueprint* → pick `pebblesvision-lgtm/PVision26`. Render reads
-   `render.yaml` and asks for the password. Deploy.
-3. Open the URL Render gives you (`https://pvsketch-xxxx.onrender.com`).
-   The first request after 15 minutes idle takes ~1 minute: the free plan
-   sleeps. Every `git push` to the branch redeploys automatically.
-
-Free hosting has no persistent disk: projects vanish on redeploy or after
-sleep. Download the *Project JSON* or the exports you want to keep. For real
-use, run it on a machine of your own (the Docker image below, or the Quick
-start above) where the `workspace` folder stays.
-
-**Cloudflare (recommended if you already use it).** Cloudflare Pages/Workers
-cannot run this app (it needs Python + OpenCV on a real CPU), but a
-**Cloudflare Tunnel** publishes the app running on your own Mac, NAS or a small
-VPS on your own domain, with Cloudflare Access in front for login. Projects stay
-on your machine. `docker-compose.yml` has both containers:
-
-1. Cloudflare dashboard → Zero Trust → Networks → Tunnels → *Create a tunnel*
-   (Cloudflared). Copy the token.
-2. Public hostname: `sketch.yourdomain.nl` → service `http://pvsketch:8000`.
-3. Copy `.env.example` to `.env`, fill in the token and a password, then:
-
-```bash
-docker compose up -d --build
-```
-
-4. Optional: Zero Trust → Access → Applications → add `sketch.yourdomain.nl`
-   with a policy "e-mail ends with @yourcompany.nl". Then the basic-auth
-   password is a second lock behind Cloudflare's login.
-
-Without Docker, the quick way to try it is to run the app locally and
-`brew install cloudflared && cloudflared tunnel --url http://localhost:5000`,
-which prints a temporary public URL (set `PVSKETCH_PASSWORD` first).
-
-**Any Docker host** (Fly.io, Railway, Hugging Face Spaces, a NAS, a VPS):
-
-```bash
-docker build -t pvsketch .
-```
-
-```bash
-docker run -p 8000:8000 -e PVSKETCH_PASSWORD=choose-one -v $PWD/workspace:/data/workspace pvsketch
-```
-
-Then open <http://localhost:8000>. The `-v` keeps projects on the host disk.
-
-## Language
-
-The interface switches between English and Nederlands with the EN/NL control
-top right. The language is also stored per project and used for the exported
-drawings (title block, "foto" in dimensions, finish names).
-
-## How to photograph
-
-Measurements only come out right when the reference and the face you measure
-lie **in the same plane**.
-
-1. **Use the marker board.** `python -m pvsketch board --paper a3` (or the
-   link on the first screen) writes a true-scale PDF with four ArUco markers.
-   Print at 100 %, check the 100 mm bar with a ruler, glue it flat on foam
-   board or MDF. Lay it on the stone face; it is found automatically and all
-   16 corners go into the calibration. A loose A4 sheet or a single 100 mm
-   marker also work, but paper curls.
-2. **Not the 0.5x ultra-wide lens.** Use 1x, step back, keep the stone in the
-   middle of the frame. For the last bit of accuracy make a **lens profile**:
-   print the checkerboard (first screen, "Camera lens profile"), photograph it
-   8-12 times from different angles with the lens you use, upload them. Later
-   photos from that camera are undistorted automatically.
-3. Shoot as square-on as you can, in flat light, whole stone and board in
-   frame. Oblique shots are rectified, but accuracy drops with the angle and
-   with distance from the board.
-4. Features that stand out of the plane (a moulding, a broken edge angled
-   away) are foreshortened. Measure those by hand and register the value, or
-   photograph the **side** as a second project and link it as a view.
-
-## The steps in the app
-
-| Step | What happens | Notes |
+| Stap | Wat | Opmerkingen |
 |---|---|---|
-| 1 Photo | Upload JPEG/PNG (60 MB cap) | Earlier projects are listed to reopen |
-| 2 Calibrate | Click the 4 corners of the sheet, or Detect the marker | Homography → rectified image at a fixed px/mm. Any corner order; portrait/landscape auto |
-| 3 Isolate | **Points**: click along the outer line (roughly), Run | GrabCut only looks for the exact edge inside a band around your points, so grey stone on a grey wall works. Or drag a **Box**. Correct with *stone* / *background* brushes and the **Eraser**; undo/redo everything. Tick *use the points exactly* to skip GrabCut |
-| 4 Outline | Douglas-Peucker simplification + least-squares **arc fitting** | Tolerance in mm, minimum arc radius/length so weathering bumps don't become arcs. **Edit vertices**: drag, double-click to add, Alt+click to delete (an arc becomes a line). Optional *detail* layer: Canny inside the stone after grain smoothing |
-| 5 Measure | Pick an **element template** (raamdorpel, vensterbank, dorpel, muurafdekker, traptrede, gevelband, ornament, pinakel) to get the checklist of measurements that element needs; *Measure* arms an item so the next two clicks fill it in, or type values that can't be seen on the photo (thickness, depth). Click 2 points → **aligned / horizontal / vertical** dimension (snaps to corners) | **Drag the dimension line** away from the stone, CAD-style, with extension lines. Solid / dashed / dotted. *Tidy up* fans them out. Type the **tape value** to register it; the drawing shows it with the photo value in brackets. D1…Dn numbering matches the table, CSV and PDF |
-| 6 Draw | **Finish regions** (bewerkingen) and free lines | Click a polygon on the face and pick the finish: gefrijnd, gescharreerd, gegradineerd, gebouchardeerd, gespitst, randslag, gezoet, gepolijst, gezaagd, gevlamd, geschuurd. It is hatched with the matching pattern (direction and spacing adjustable), labelled F1…Fn and listed in the title block. Lines/arrows/leader text in solid, dashed or dotted |
-| 7 Export | Link other projects as **views** (side, profile, top, back): they are drawn next to this one, tops aligned, under one title block. Then DXF 2010, DXF R12, SVG, **PDF at true scale** (A4/A3 auto, 1:2 / 1:5 when it doesn't fit), CSV of measurements, PNG, JSON | All in mm. DXF: layers `OUTLINE`, `DETAIL`, `DIM`, `TEXT`, `$INSUNITS` = mm. R12 uses POLYLINE and exploded dimensions for old CAM/CAD software |
+| 1 Foto | Foto maken (telefoon/tablet) of kiezen | JPEG, PNG, HEIC. Recht van voren fotograferen |
+| 2 Isoleren | **Punten** langs de buitenlijn tikken, *Uitvoeren* | GrabCut zoekt de rand alleen in de band rond uw punten. Kwasten steen/achtergrond, gum, ongedaan maken. *Punten exact* = geen GrabCut |
+| 3 Omtrek | Vereenvoudigen + **bogen passen** | Punten verplaatsen, toevoegen (dubbeltik), verwijderen. Optioneel detaillijnen |
+| 4 Opmeten | Twee punten tikken → **maat intypen** | De eerste maat zet de schaal (⌖ bij een maat: deze als schaal gebruiken). Schuin / horizontaal / verticaal, maatlijn slepen, *Opruimen*. **Elementsjabloon** (raamdorpel, vensterbank, dorpel, muurafdekker, traptrede, gevelband, ornament, pinakel) geeft de checklist van verplichte maten; wat niet op de foto staat typt u direct |
+| 5 Tekenen | **Bewerkingsvlakken** met arcering | gefrijnd schuin/verticaal/horizontaal, gescharreerd, gegradineerd, kathedraalslag, vrije kathedraalslag, gebouchardeerd, gespitst, randslag, gezoet, gepolijst, gezaagd, gevlamd, geschuurd. Per vlak: **slagen per 10 cm** en een opmerking; beide komen in de legenda. Lijnen, pijlen, tekst |
+| 6 Exporteren | **PDF** (ware grootte A4/A3, anders 1:2 / 1:5), **PNG / JPEG**, DXF 2010 en R12, SVG, CSV | Titelblok: project, element, steensoort, aantal, afwerking, getekend door. Andere aanzichten (zijaanzicht, profiel, …) koppelen aan hetzelfde blad |
 
-Viewer: wheel = zoom, right-drag (or shift-drag) = pan, `f` = fit, `Esc` = cancel.
-On a phone or tablet: one finger = the tool, two fingers = pinch zoom and pan,
-plus the + − ⌖ buttons top right of the image.
-Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z redo. Isolate shortcuts: `p` points, `b` box,
-`s` stone brush, `g` background brush, `e` eraser, Backspace removes the last point.
+Zolang er nog geen maat is ingevoerd staat op elke export **NIET OP SCHAAL**.
 
-### Importing into stone software
+Bediening: wiel = zoom, rechts slepen = verschuiven, `f` = passend, Ctrl/Cmd+Z
+= ongedaan. Tablet: één vinger = gereedschap, twee vingers = zoom en
+verschuiven, knoppen + − ⌖ rechtsboven in het beeld.
 
-The DXF is the file to take into CAD/CAM. Try the 2010 version first; if the
-program complains, use the R12 one. Outline on layer `OUTLINE` as polylines and
-true arcs, measurements on `DIM`. The PDF is for the workshop and the project
-file, the CSV for a spreadsheet or a price calculation.
+## Perspectief
 
-## Headless / batch
+De omtrek is de vorm zoals de camera hem zag. Fotografeer daarom **recht van
+voren**; een scheve foto geeft een scheve tekening. De getypte maten zijn
+altijd leidend; de tekening is de drager van die maten.
 
-```bash
-# A4 corners known (x1,y1,...,x4,y4 in the photo), box around the stone in rectified px
-python -m pvsketch run photo.jpg --sheet a4 --corners 205,241,736,230,667,1005,147,989 --rect 950,400,770,470 --detail --out out/
+## Als webapp (testen op een tablet)
 
-# printed 100 mm marker in the photo, auto-detected
-python -m pvsketch run photo.jpg --aruco 100 --out out/
+Dezelfde app draait op een server. Zet `PVSKETCH_PASSWORD` (wachtwoord op
+alle pagina's) en `PVSKETCH_RETENTION_DAYS` (oude projecten opruimen).
 
-# re-export a project from the web app
-python -m pvsketch export 20261030-221034-b22fff --out out/ --with-photo
-```
+- **Cloudflare Tunnel** (aanbevolen bij een eigen Cloudflare-account):
+  `docker-compose.yml` bevat de app en `cloudflared`. Zero Trust → Networks →
+  Tunnels → tunnel maken, token in `.env` (zie `.env.example`), hostnaam
+  naar `http://pvsketch:8000`, dan `docker compose up -d --build`.
+  Cloudflare Access ervoor zetten voor inloggen op e-mailadres.
+- **Render.com** (gratis): New + → Blueprint → deze repository; `render.yaml`
+  regelt de rest. Let op: geen vaste schijf op het gratis plan.
+- **Elke Docker-host**: `docker build -t pvsketch .` en
+  `docker run -p 8000:8000 -e PVSKETCH_PASSWORD=... -v $PWD/workspace:/data/workspace pvsketch`.
 
-## Smart select (optional AI segmentation)
-
-GrabCut plus the Points tool handles most stones. For click-and-done on
-grey-on-grey, the Isolate step can use a Segment-Anything model that runs
-offline through onnxruntime. It is off until the model files are present:
+## Headless
 
 ```bash
-python -m pvsketch models
+python -m pvsketch run foto.jpg --rect x,y,w,h --width-mm 1240 --out out/
+python -m pvsketch export <project-id> --out out/
 ```
 
-prints the folder and the two file names (MobileSAM ONNX encoder and decoder,
-about 55 MB together, from the MobileSAM project), plus
-`pip install onnxruntime`. The sandbox this was built in could not download the
-weights, so the model path is tested with stub models only; if the real model
-raises an error in the UI, send it over and it will be fixed quickly.
-
-## Accuracy on the synthetic sample
-
-| quantity | truth | measured |
-|---|---|---|
-| width | 300 mm | 300.6–301.1 mm |
-| height | 180 mm | 180.4–181.2 mm |
-| corner radius | 90 mm | 89.6–89.9 mm |
-
-The ~0.5 mm excess is the mask edge sitting half a pixel outside the true
-edge at 2.5 px/mm; a closer photo (more px/mm) shrinks it. Real stone will
-be worse than this: expect a few mm over a 300 mm piece from a careful
-square-on photo, which is why hand-measured values are registered on top.
-
-## Layout
+## Indeling
 
 ```
 pvsketch/
-  calibrate.py   homography from quad / ArUco / two points; marker generator
-  segment.py     GrabCut guided by box / polygon band, ordered strokes with eraser
-  contour.py     outer contour → simplify → lines + arcs; detail edge tracing
-  geometry.py    Polyline / Arc / Dimension / Label / Drawing (mm, y-down)
-  export_svg.py  SVG at 1 unit = 1 mm with title block and scale bar; PNG preview
-  export_dxf.py  DXF via ezdxf (y flipped to CAD y-up), R2010 or R12
-  export_pdf.py  dependency-free vector PDF at true scale with title block + table
-  export_table.py CSV of the registered measurements
-  hatch.py       hatch patterns for hand finishes (lines, groups, dots, strokes, edge ticks)
-  board.py       A3/A4 marker board: true-scale PDF + 16-corner auto calibration
-  lens.py        checkerboard PDF, lens calibration, undistortion, camera profiles
-  templates.py   element templates (raamdorpel, vensterbank, ...) -> measurement checklist
-  views.py       several views (projects) of one element on one sheet
-  segment_ai.py  optional click-to-segment via a SAM ONNX model (onnxruntime)
-  i18n.py        strings for exported drawings (en/nl) and finish names
-  project.py     per-project folder: original, rectified.jpg, mask.png, project.json
-  server/        Flask API + single-page UI (vanilla JS, no CDN, works offline)
-  __main__.py    serve / run / export / marker / board / models
-Dockerfile, render.yaml, docker-compose.yml   web deployment (gunicorn, password, Cloudflare Tunnel)
-samples/make_sample.py   synthetic test photo with ground truth
-tests/test_pipeline.py   end-to-end checks (python -m unittest)
+  calibrate.py   tekenruimte: px ↔ mm, schaal uit de eerste getypte maat
+  segment.py     GrabCut met punten-band / kader, kwaststreken, gum
+  contour.py     omtrek → vereenvoudigen → lijnen + bogen; detaillijnen
+  geometry.py    Polyline / Arc / Dimension / Finish / Sketch / Drawing (mm)
+  hatch.py       arceringen voor bewerkingen (lijnen, bundels, visgraat, bogen, stippen, randslag)
+  templates.py   elementsjablonen → checklist van maten
+  views.py       meerdere aanzichten op één blad
+  export_svg.py / export_pdf.py / export_dxf.py / export_table.py
+  i18n.py        teksten op de tekening (nl/en) en namen van bewerkingen
+  project.py     projectmap: original, rectified.jpg, mask.png, project.json
+  server/        Flask-API + één-pagina-UI (vanilla JS, geen CDN, offline)
+  __main__.py    serve / run / export
+samples/make_sample.py   synthetische testfoto
+tests/test_pipeline.py   python -m unittest
+Dockerfile, render.yaml, docker-compose.yml
 ```
 
-## Why not the two starting-point projects
+## Bekende grenzen
 
-*DoodlePic* gives a pencil-shading effect (divide-blend of a blurred inverse),
-no geometry and no vector output. *Image-To-Drawing* re-implements Canny and
-XDoG in PyTorch, its flow-based XDoG is a stub, and its main script imports a
-model and weights that are not in the repository. Neither can produce a
-measurable contour. This project uses OpenCV's own Canny/GrabCut and adds the
-parts that matter for production drawings: metric calibration, arc fitting,
-dimension registration and CAD export.
-
-## Known limits
-
-- One plane per calibration. For a return or a second face, take a second photo.
-- GrabCut needs some colour/texture contrast between stone and background; use the brushes when it fails.
-- Detail lines are a visual aid, not geometry you should machine from.
-- HEIC photos from iPhones are read through `pillow-heif` (in requirements). If that
-  package fails to install on your machine, convert to JPEG first.
+- Eén vlak per foto. Een zijkant of profiel is een tweede foto, gekoppeld als aanzicht.
+- GrabCut heeft wat contrast nodig; de Punten-band en de kwasten vangen de rest op.
+- Detaillijnen zijn een hulp voor het oog, geen geometrie om op te bewerken.

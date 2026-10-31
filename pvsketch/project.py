@@ -21,9 +21,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from . import board as board_mod
 from . import calibrate as cal_mod
-from . import lens as lens_mod
 from . import templates as tpl_mod
 from . import contour as contour_mod
 from . import segment as seg_mod
@@ -73,7 +71,8 @@ def _safe_name(name: str) -> str:
 def asdict_finish(f: Finish) -> dict[str, Any]:
     """Finish without the computed hatch (that is derived on read)."""
     return {"polygon": [list(p) for p in f.polygon], "kind": f.kind, "angle_deg": f.angle_deg,
-            "spacing_mm": f.spacing_mm, "width_mm": f.width_mm, "label": f.label, "id": f.id}
+            "spacing_mm": f.spacing_mm, "width_mm": f.width_mm, "label": f.label, "id": f.id,
+            "strokes_per_10cm": f.strokes_per_10cm, "comment": f.comment}
 
 
 class Project:
@@ -96,12 +95,10 @@ class Project:
             "finishes": [],
             "sketches": [],
             "titleblock": {},
-            "lang": "en",
+            "lang": "nl",
             "template": "",
             "checklist": [],
             "views": [],            # [{"project": id, "name": "side"|"top"|"profile"|free text}]
-            "lens": "",             # camera profile name applied to the original (undistort)
-            "exif": {},
         }
         self.root = root
         self._cache: dict[str, Any] = {}
@@ -151,15 +148,10 @@ class Project:
         if img2 is not None:
             img = img2
         p.state["original"] = orig
-        make, model = lens_mod.exif_make_model(image_bytes)
-        p.state["exif"] = {"make": make, "model": model}
-        auto = lens_mod.match_profile(root, make, model, (int(img.shape[1]), int(img.shape[0])))
-        if auto:
-            p.state["lens"] = auto
-            p._cache.pop("original", None)
         p.state["name"] = _safe_name(os.path.splitext(filename)[0])
         p.state["image_size"] = [int(img.shape[1]), int(img.shape[0])]
         p._cache["original"] = img
+        p.state["calibration"] = cal_mod.initial_calibration(cal_mod.working_image(img).shape).to_dict()
         p.save()
         return p
 
@@ -180,7 +172,7 @@ class Project:
                     with open(jp, encoding="utf-8") as f:
                         s = json.load(f)
                     out.append({"id": pid, "name": s.get("name", ""), "created": s.get("created"),
-                                "updated": s.get("updated"), "calibrated": bool(s.get("calibration")),
+                                "updated": s.get("updated"), "calibrated": True, "scaled": bool((s.get("calibration") or {}).get("scaled")),
                                 "segmented": bool(s.get("segmentation")), "outlined": bool(s.get("outline")),
                                 "dimensions": len(s.get("dimensions", []))})
                 except (OSError, ValueError):
@@ -189,47 +181,19 @@ class Project:
 
     # ----------------------------------------------------------------- images
     def original(self) -> np.ndarray:
-        """The photo as the pipeline sees it: undistorted when a lens profile is set."""
         if "original" not in self._cache:
             img = cv2.imread(os.path.join(self.dir, self.state["original"]), cv2.IMREAD_COLOR)
             if img is None:
                 raise FileNotFoundError("original image missing")
-            name = self.state.get("lens") or ""
-            if name:
-                prof = lens_mod.load_profile(self.root, name)
-                if prof:
-                    try:
-                        img = lens_mod.undistort(img, prof)
-                    except ValueError:
-                        pass
             self._cache["original"] = img
         return self._cache["original"]
-
-    def set_lens(self, name: str | None) -> str:
-        """'' = none, 'auto' = match by EXIF/size, else a profile name. Resets calibration."""
-        if name == "auto":
-            ex = self.state.get("exif") or {}
-            w, h = self.state.get("image_size") or (0, 0)
-            name = lens_mod.match_profile(self.root, ex.get("make", ""), ex.get("model", ""), (w, h)) or ""
-        name = name or ""
-        if name and not lens_mod.load_profile(self.root, name):
-            raise ValueError("unknown lens profile")
-        if name != (self.state.get("lens") or ""):
-            self.state["lens"] = name
-            self._cache.pop("original", None)
-            self._invalidate_from("calibration")
-            self.state["dimensions"] = []
-        self.save()
-        return name
 
     def rectified(self) -> np.ndarray:
         if "rectified" not in self._cache:
             path = os.path.join(self.dir, "rectified.jpg")
             img = cv2.imread(path, cv2.IMREAD_COLOR) if os.path.isfile(path) else None
             if img is None:
-                if not self.calibration:
-                    raise RuntimeError("calibrate first")
-                img = cal_mod.rectify(self.original(), self.calibration)
+                img = cal_mod.working_image(self.original())
                 cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 92])
             self._cache["rectified"] = img
         return self._cache["rectified"]
@@ -250,13 +214,6 @@ class Project:
         """Downstream results depend on upstream ones; drop them."""
         order = ["calibration", "segmentation", "outline"]
         for s in order[order.index(stage):]:
-            if s == "calibration":
-                self.state["calibration"] = None
-                for k in ("rectified.jpg",):
-                    fp = os.path.join(self.dir, k)
-                    if os.path.isfile(fp):
-                        os.remove(fp)
-                self._cache.pop("rectified", None)
             if s == "segmentation":
                 self.state["segmentation"] = None
                 fp = os.path.join(self.dir, "mask.png")
@@ -267,40 +224,43 @@ class Project:
                 self.state["outline"] = None
                 self.state["detail"] = None
 
-    def set_calibration(self, cal: cal_mod.Calibration) -> None:
-        self._invalidate_from("calibration")
+    # ------------------------------------------------------------------ scale
+    def _rescale(self, factor: float) -> None:
+        """Multiply all stored mm geometry by ``factor`` and adjust ppm so the
+        pixel mapping stays the same; spacings (physical mm) are untouched."""
+        if abs(factor - 1.0) < 1e-12:
+            return
+        dr = self.drawing().scale(factor)
+        if self.state.get("outline") is not None:
+            self.state["outline"] = [x.to_dict() for x in dr.outline]
+        if self.state.get("detail") is not None:
+            self.state["detail"] = [x.to_dict() for x in dr.detail]
+        self.state["dimensions"] = [d.to_dict() for d in dr.dimensions]
+        self.state["labels"] = [l.to_dict() for l in dr.labels]
+        self.state["finishes"] = [asdict_finish(f) for f in dr.finishes]
+        self.state["sketches"] = [sk.to_dict() for sk in dr.sketches]
+        cal = self.calibration
+        cal.ppm = cal.ppm / factor
         self.state["calibration"] = cal.to_dict()
-        self.state["dimensions"] = []
-        self.state["labels"] = []
-        self.rectified()  # compute + cache now
+        self.state["outline_params"]["epsilon_mm"] = round(self.state["outline_params"]["epsilon_mm"] * factor, 3)
+
+    def scale_from_dimension(self, index: int, typed_mm: float) -> cal_mod.Calibration:
+        """Make dimension ``index`` measure exactly ``typed_mm``: the typed value
+        defines the drawing's scale. Nothing is measured from the photo."""
+        dims = self.state.get("dimensions") or []
+        if not (0 <= index < len(dims)):
+            raise ValueError("no such dimension")
+        d = Dimension.from_dict(dims[index])
+        cur = d.measured_auto()
+        if cur <= 1e-9 or typed_mm <= 0:
+            raise ValueError("dimension has no length")
+        self._rescale(typed_mm / cur)
+        cal = self.calibration
+        cal.scaled = True
+        label = d.label or f"D{index+1}"
+        cal.scale_note = f"{'schaal uit' if self.state.get('lang') == 'nl' else 'scale from'} {label} = {typed_mm:g} mm"
+        self.state["calibration"] = cal.to_dict()
         self.save()
-
-    def calibrate_quad(self, quad_px, width_mm: float, height_mm: float, ppm: float | None = None) -> cal_mod.Calibration:
-        img = self.original()
-        cal = cal_mod.calibrate_quad(img.shape, quad_px, width_mm, height_mm, ppm=ppm)
-        self.set_calibration(cal)
-        return cal
-
-    def calibrate_sheet(self, quad_px, sheet: str = "a4", ppm: float | None = None) -> cal_mod.Calibration:
-        w, h = cal_mod.REFERENCE_SHEETS[sheet.lower()]
-        cal = self.calibrate_quad(quad_px, w, h, ppm)
-        cal.note = f"quad: {sheet.upper()} sheet {w:g} x {h:g} mm"
-        self.state["calibration"] = cal.to_dict(); self.save()
-        return cal
-
-    def calibrate_aruco(self, marker_size_mm: float, marker_id: int | None = None, ppm: float | None = None) -> cal_mod.Calibration:
-        cal = cal_mod.calibrate_aruco(self.original(), marker_size_mm, marker_id, ppm=ppm)
-        self.set_calibration(cal)
-        return cal
-
-    def calibrate_board(self, board: str = "a3", ppm: float | None = None) -> cal_mod.Calibration:
-        cal, _ids = board_mod.calibrate_board(self.original(), board, ppm=ppm)
-        self.set_calibration(cal)
-        return cal
-
-    def calibrate_two_point(self, p1, p2, dist_mm: float) -> cal_mod.Calibration:
-        cal = cal_mod.calibrate_two_point(self.original().shape, p1, p2, dist_mm)
-        self.set_calibration(cal)
         return cal
 
     # ----------------------------------------------------------- segmentation
@@ -480,9 +440,7 @@ class Project:
 
     # ---------------------------------------------------------------- drawing
     def drawing(self) -> Drawing:
-        cal = self.calibration
-        if cal is None:
-            raise RuntimeError("calibrate first")
+        cal = self.calibration or cal_mod.initial_calibration((self.state["image_size"][1], self.state["image_size"][0]))
         dr = Drawing(width_mm=cal.width_mm, height_mm=cal.height_mm)
         dr.outline = [primitive_from_dict(d) for d in (self.state.get("outline") or [])]
         dr.detail = [primitive_from_dict(d) for d in (self.state.get("detail") or [])]  # type: ignore[misc]
@@ -493,6 +451,6 @@ class Project:
         dr.titleblock = dict(self.state.get("titleblock") or {})
         dr.checklist = [dict(c) for c in self.state.get("checklist") or []]
         dr.meta = {"name": self.state.get("name", ""), "source": self.state.get("original", ""),
-                   "calibration": cal.note, "ppm": cal.ppm, "project": self.id,
-                   "lang": self.state.get("lang", "en")}
+                   "calibration": cal.note, "scaled": cal.scaled, "ppm": cal.ppm, "project": self.id,
+                   "lang": self.state.get("lang", "nl")}
         return dr

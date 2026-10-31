@@ -83,8 +83,8 @@ class Dimension:
     note: str = ""
 
     @property
-    def value_mm(self) -> float:
-        return self.manual_mm if self.manual_mm is not None else self.auto_mm
+    def value_mm(self) -> float | None:
+        return self.manual_mm
 
     def measured_auto(self) -> float:
         """Photo distance according to ``kind``."""
@@ -96,9 +96,8 @@ class Dimension:
         return math.hypot(dx, dy)
 
     def text(self, lang: str = "en") -> str:
-        t = f"{self.value_mm:.1f}"
-        if self.manual_mm is not None and abs(self.manual_mm - self.auto_mm) > 0.05:
-            t += f" ({'foto' if lang == 'nl' else 'photo'} {self.auto_mm:.1f})"
+        """Only the typed value goes on the drawing; '?' until it is typed."""
+        t = f"{self.manual_mm:g}" if self.manual_mm is not None else "?"
         if self.label:
             t = f"{self.label}: {t}"
         return t
@@ -182,12 +181,29 @@ class Finish:
     width_mm: float | None = None   # randslag band width
     label: str = ""
     id: str = ""
+    strokes_per_10cm: float | None = None   # slagen per 10 cm (sets the spacing when given)
+    comment: str = ""                       # free note for the legend
+
+    @property
+    def effective_spacing(self) -> float | None:
+        if self.strokes_per_10cm:
+            return 100.0 / float(self.strokes_per_10cm)
+        return self.spacing_mm
+
+    def legend(self, lang: str = "en") -> str:
+        from .i18n import finish_name
+        t = self.label or finish_name(self.kind, lang)
+        if self.strokes_per_10cm:
+            t += f", {self.strokes_per_10cm:g} {'slagen/10 cm' if lang == 'nl' else 'strokes/10 cm'}"
+        if self.comment:
+            t += f" - {self.comment}"
+        return t
 
     def to_dict(self) -> dict[str, Any]:
         from .hatch import finish_hatch, centroid
         d = asdict(self)
         d["polygon"] = [list(p) for p in self.polygon]
-        d["hatch"] = finish_hatch(self.polygon, self.kind, self.angle_deg, self.spacing_mm, self.width_mm)
+        d["hatch"] = finish_hatch(self.polygon, self.kind, self.angle_deg, self.effective_spacing, self.width_mm)
         d["centroid"] = list(centroid(self.polygon))
         return d
 
@@ -198,7 +214,8 @@ class Finish:
         return Finish(polygon=[(float(p[0]), float(p[1])) for p in d.get("polygon", [])],
                       kind=str(d.get("kind") or "frijnen"), angle_deg=opt(d.get("angle_deg")),
                       spacing_mm=opt(d.get("spacing_mm")), width_mm=opt(d.get("width_mm")),
-                      label=str(d.get("label", "")), id=str(d.get("id", "")))
+                      label=str(d.get("label", "")), id=str(d.get("id", "")),
+                      strokes_per_10cm=opt(d.get("strokes_per_10cm")), comment=str(d.get("comment", "")))
 
 
 @dataclass
@@ -249,7 +266,32 @@ class Drawing:
 
     @property
     def lang(self) -> str:
-        return self.meta.get("lang", "en")
+        return self.meta.get("lang", "nl")
+
+    def scale(self, factor: float) -> "Drawing":
+        """Multiply every coordinate (not spacings) by ``factor``: used when a
+        typed measurement defines the true scale."""
+        from .views import translate_drawing  # reuse the deep copy
+        out = translate_drawing(self, 0, 0)
+        f = float(factor)
+        def P(p): return (p[0] * f, p[1] * f)  # noqa: E704
+        for prim in out.outline:
+            if isinstance(prim, Polyline):
+                prim.points = [P(p) for p in prim.points]
+            else:
+                prim.center = P(prim.center); prim.start = P(prim.start); prim.end = P(prim.end); prim.radius *= f
+        for pl in out.detail:
+            pl.points = [P(p) for p in pl.points]
+        for d in out.dimensions:
+            d.p1 = P(d.p1); d.p2 = P(d.p2); d.auto_mm *= f; d.offset_mm *= f
+        for l in out.labels:
+            l.pos = P(l.pos)
+        for fi in out.finishes:
+            fi.polygon = [P(p) for p in fi.polygon]
+        for sk in out.sketches:
+            sk.points = [P(p) for p in sk.points]
+        out.width_mm *= f; out.height_mm *= f
+        return out
 
     def outline_bbox(self) -> tuple[float, float, float, float] | None:
         xs: list[float] = []

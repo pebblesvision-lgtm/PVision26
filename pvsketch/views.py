@@ -33,7 +33,8 @@ def translate_drawing(dr: Drawing, dx: float, dy: float) -> Drawing:
                                 kind=d.kind, offset_mm=d.offset_mm, style=d.style, note=d.note) for d in dr.dimensions]
     out.labels = [Label(pos=T(l.pos), text=l.text, id=l.id) for l in dr.labels]
     out.finishes = [Finish(polygon=[T(p) for p in f.polygon], kind=f.kind, angle_deg=f.angle_deg, spacing_mm=f.spacing_mm,
-                           width_mm=f.width_mm, label=f.label, id=f.id) for f in dr.finishes]
+                           width_mm=f.width_mm, label=f.label, id=f.id, strokes_per_10cm=f.strokes_per_10cm,
+                           comment=f.comment) for f in dr.finishes]
     out.sketches = [Sketch(points=[T(p) for p in s.points], style=s.style, arrow=s.arrow, text=s.text, id=s.id) for s in dr.sketches]
     return out
 

@@ -25,6 +25,10 @@ Segment = tuple[Point, Point]
 
 FINISH_DEFAULTS: dict[str, dict[str, Any]] = {
     "frijnen": {"pattern": "lines", "spacing": 3.0, "angle": 45.0},
+    "frijnen_v": {"pattern": "lines", "spacing": 3.0, "angle": 90.0},
+    "frijnen_h": {"pattern": "lines", "spacing": 3.0, "angle": 0.0},
+    "kathedraal": {"pattern": "herringbone", "spacing": 3.0, "angle": 45.0, "width": 40.0},
+    "kathedraal_vrij": {"pattern": "curves", "spacing": 4.0, "angle": 0.0},
     "scharreren": {"pattern": "lines", "spacing": 10.0, "angle": 45.0},
     "gradineren": {"pattern": "groups", "spacing": 12.0, "angle": 45.0},
     "boucharderen": {"pattern": "dots", "spacing": 4.0, "angle": 0.0},
@@ -139,6 +143,76 @@ def random_strokes(poly: Sequence[Point], spacing: float, length_ratio: float = 
     return out
 
 
+def herringbone(poly: Sequence[Point], spacing: float, band: float, angle_deg: float = 45.0) -> list[Segment]:
+    """Kathedraalslag: vertical bands of chisel lines, direction alternating
+    +angle / -angle per band, plus the band boundaries."""
+    if len(poly) < 3 or spacing <= 0 or band <= 0:
+        return []
+    xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    out: list[Segment] = []
+    k = 0
+    x = x0
+    while x < x1:
+        strip = [(x, y0 - 1), (min(x + band, x1 + 1), y0 - 1), (min(x + band, x1 + 1), y1 + 1), (x, y1 + 1)]
+        clipped = _clip_poly(poly, strip)
+        if len(clipped) >= 3:
+            out += parallel_lines(clipped, angle_deg if k % 2 == 0 else -angle_deg, spacing)
+            if k > 0:
+                out += _scanlines_vertical(poly, x)
+        x += band; k += 1
+    return out
+
+
+def _scanlines_vertical(poly: Sequence[Point], x: float) -> list[Segment]:
+    rp = [(p[1], p[0]) for p in poly]           # swap axes and reuse the horizontal clipper
+    return [((q[1], q[0]), (r[1], r[0])) for q, r in _scanlines(rp, [x])]
+
+
+def _clip_poly(subject: Sequence[Point], clip_rect: Sequence[Point]) -> list[Point]:
+    """Sutherland-Hodgman clip of ``subject`` by an axis-aligned rectangle."""
+    xs = [p[0] for p in clip_rect]; ys = [p[1] for p in clip_rect]
+    bounds = [("x>", min(xs)), ("x<", max(xs)), ("y>", min(ys)), ("y<", max(ys))]
+    pts = list(subject)
+    for kind, v in bounds:
+        if not pts:
+            break
+        inside = (lambda p: p[0] >= v) if kind == "x>" else (lambda p: p[0] <= v) if kind == "x<" else \
+                 (lambda p: p[1] >= v) if kind == "y>" else (lambda p: p[1] <= v)
+        def inter(a, b):
+            if kind[0] == "x":
+                t = (v - a[0]) / (b[0] - a[0]) if b[0] != a[0] else 0.0
+                return (v, a[1] + t * (b[1] - a[1]))
+            t = (v - a[1]) / (b[1] - a[1]) if b[1] != a[1] else 0.0
+            return (a[0] + t * (b[0] - a[0]), v)
+        out = []
+        for i, cur in enumerate(pts):
+            prev = pts[i - 1]
+            if inside(cur):
+                if not inside(prev):
+                    out.append(inter(prev, cur))
+                out.append(cur)
+            elif inside(prev):
+                out.append(inter(prev, cur))
+        pts = out
+    return pts
+
+
+def curved_strokes(poly: Sequence[Point], spacing: float, seed: int = 11) -> list[Segment]:
+    """Vrije kathedraalslag: short arcs in loose rows, as polyline segments."""
+    rng = random.Random(seed)
+    out: list[Segment] = []
+    for cx, cy in dot_field(poly, spacing * 2.2):
+        a0 = rng.random() * math.pi
+        r = spacing * (1.2 + rng.random())
+        sweep = 1.1 + rng.random() * 0.8
+        n = 5
+        pts = [(cx + r * math.cos(a0 + sweep * i / n), cy + r * math.sin(a0 + sweep * i / n)) for i in range(n + 1)]
+        if all(point_in_poly(p, poly) for p in pts):
+            out += list(zip(pts, pts[1:]))
+    return out
+
+
 def edge_ticks(poly: Sequence[Point], spacing: float, width: float) -> list[Segment]:
     """Drafted margin: short lines perpendicular to each edge, pointing inward,
     plus the inner boundary of the band."""
@@ -187,6 +261,10 @@ def finish_hatch(polygon: Sequence[Sequence[float]], kind: str, angle_deg: float
             lines = random_strokes(poly, sp)
         elif pat == "edge":
             lines = edge_ticks(poly, sp, float(width or d.get("width", 25.0)))
+        elif pat == "herringbone":
+            lines = herringbone(poly, sp, float(width or d.get("width", 40.0)), ang)
+        elif pat == "curves":
+            lines = curved_strokes(poly, sp)
     # keep the export light
     if len(lines) > 6000:
         lines = lines[:: math.ceil(len(lines) / 6000)]

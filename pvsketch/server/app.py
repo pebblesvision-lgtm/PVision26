@@ -7,21 +7,17 @@ import os
 import shutil
 import threading
 import time
-from typing import Any
+
 
 import cv2
 import numpy as np
 from flask import Flask, Response, abort, g, jsonify, render_template, request, send_file
 
-from .. import calibrate as cal_mod
 from .. import segment as seg_mod
 from ..export_dxf import drawing_to_dxf
 from ..export_pdf import drawing_to_pdf
 from ..export_svg import drawing_to_png, drawing_to_svg
 from ..export_table import dimensions_csv
-from .. import board as board_mod
-from .. import lens as lens_mod
-from .. import segment_ai
 from ..hatch import FINISH_DEFAULTS
 from ..templates import ELEMENT_TEMPLATES, templates_json
 from ..i18n import FINISH_NAMES
@@ -116,7 +112,7 @@ def create_app(workspace: str | None = None) -> Flask:
     # ------------------------------------------------------------- pages
     @app.get("/")
     def index():
-        return render_template("index.html", sheets=cal_mod.REFERENCE_SHEETS)
+        return render_template("index.html")
 
     # ---------------------------------------------------------- projects
     @app.get("/api/projects")
@@ -164,56 +160,8 @@ def create_app(workspace: str | None = None) -> Flask:
             p.set_titleblock(body["titleblock"])
         if isinstance(body.get("views"), list):
             p.set_views(body["views"], app.config["WORKSPACE"])
-        if "lens" in body:
-            try:
-                p.set_lens(body["lens"])
-            except ValueError as e:
-                return err(str(e))
         p.save()
         return jsonify(p.state)
-
-    # ------------------------------------------------------ lens profiles
-    @app.get("/api/cameras")
-    def cameras():
-        return jsonify(lens_mod.list_profiles(app.config["WORKSPACE"]))
-
-    @app.post("/api/cameras")
-    def create_camera():
-        files = request.files.getlist("photos")
-        if len(files) < 4:
-            return err("upload at least 4 checkerboard photos (8-12 is better)")
-        imgs, make, model = [], "", ""
-        for f in files:
-            data = f.read()
-            img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-            if img is None:
-                continue
-            if not model:
-                make, model = lens_mod.exif_make_model(data)
-            imgs.append(img)
-        try:
-            prof = lens_mod.calibrate_lens(imgs, name=request.form.get("name") or model or "camera", make=make, model=model)
-        except (ValueError, cv2.error) as e:
-            return err(f"lens calibration failed: {e}")
-        lens_mod.save_profile(app.config["WORKSPACE"], prof)
-        return jsonify(prof)
-
-    @app.delete("/api/cameras/<name>")
-    def delete_camera(name):
-        return jsonify({"deleted": lens_mod.delete_profile(app.config["WORKSPACE"], name)})
-
-    @app.get("/api/checkerboard.pdf")
-    def checkerboard():
-        return send_file(io.BytesIO(lens_mod.checkerboard_pdf()), mimetype="application/pdf", as_attachment=True,
-                         download_name="pvsketch-checkerboard.pdf")
-
-    @app.get("/api/board/<board>.pdf")
-    def board_pdf(board):
-        board = board.lower()
-        if board not in board_mod.BOARDS:
-            abort(404)
-        return send_file(io.BytesIO(board_mod.board_pdf(board)), mimetype="application/pdf", as_attachment=True,
-                         download_name=f"pvsketch-board-{board}.pdf")
 
     @app.get("/api/templates")
     def templates():
@@ -230,7 +178,7 @@ def create_app(workspace: str | None = None) -> Flask:
 
     @app.get("/api/finishes")
     def finishes():
-        return jsonify([{"kind": k, "nl": v[0], "en": v[1], **FINISH_DEFAULTS.get(k, {})} for k, v in FINISH_NAMES.items()])
+        return jsonify([{"kind": k, "nl": v[0], "en": v[1], **FINISH_DEFAULTS.get(k, {"pattern": "none", "spacing": 0, "angle": 0})} for k, v in FINISH_NAMES.items()])
 
     @app.get("/api/projects/<pid>/image/<kind>")
     def project_image(pid, kind):
@@ -238,8 +186,6 @@ def create_app(workspace: str | None = None) -> Flask:
         if kind == "original":
             return _png_response(p.original(), jpeg=True)
         if kind == "rectified":
-            if not p.calibration:
-                abort(404)
             return _png_response(p.rectified(), jpeg=True)
         if kind == "mask":
             m = p.mask()
@@ -256,56 +202,22 @@ def create_app(workspace: str | None = None) -> Flask:
             return _png_response(drawing_to_png(dr, px_per_mm=3, background=p.rectified()))
         abort(404)
 
-    # ------------------------------------------------------- calibration
-    @app.post("/api/projects/<pid>/calibrate")
-    def calibrate(pid):
+    # ------------------------------------------------------------- scale
+    @app.put("/api/projects/<pid>/scale")
+    def set_scale(pid):
+        """The typed value of one dimension defines the drawing scale."""
         p = load(pid)
-        b: dict[str, Any] = request.get_json(force=True) or {}
-        mode = b.get("mode", "quad")
-        ppm = b.get("ppm")
-        ppm = float(ppm) if ppm else None
+        b = request.get_json(force=True) or {}
         try:
-            if mode == "quad":
-                pts = b.get("points") or []
-                if len(pts) != 4:
-                    return err("click the 4 corners of the reference")
-                sheet = (b.get("sheet") or "custom").lower()
-                if sheet in cal_mod.REFERENCE_SHEETS:
-                    cal = p.calibrate_sheet(pts, sheet, ppm)
-                else:
-                    w, h = float(b["width_mm"]), float(b["height_mm"])
-                    if w <= 0 or h <= 0:
-                        return err("reference size must be positive")
-                    cal = p.calibrate_quad(pts, w, h, ppm)
-            elif mode == "aruco":
-                cal = p.calibrate_aruco(float(b.get("marker_mm", 100)), b.get("marker_id"), ppm)
-            elif mode == "board":
-                board = str(b.get("board", "a3")).lower()
-                if board not in board_mod.BOARDS:
-                    return err("unknown board")
-                cal = p.calibrate_board(board, ppm)
-            elif mode == "two_point":
-                pts = b.get("points") or []
-                if len(pts) != 2:
-                    return err("click 2 points")
-                cal = p.calibrate_two_point(pts[0], pts[1], float(b["dist_mm"]))
-            else:
-                return err("unknown mode")
-        except (ValueError, KeyError, cv2.error) as e:
-            return err(f"calibration failed: {e}")
-        return jsonify({"calibration": cal.to_dict(), "state": p.state})
-
-    @app.get("/api/projects/<pid>/aruco")
-    def aruco(pid):
-        p = load(pid)
-        return jsonify(cal_mod.detect_aruco(p.original()))
+            cal = p.scale_from_dimension(int(b.get("index", 0)), float(b.get("mm", 0)))
+        except (ValueError, TypeError) as e:
+            return err(str(e))
+        return jsonify({"calibration": cal.to_dict(), "drawing": p.drawing().to_dict(), "state": p.state})
 
     # ------------------------------------------------------ segmentation
     @app.post("/api/projects/<pid>/segment")
     def segment(pid):
         p = load(pid)
-        if not p.calibration:
-            return err("calibrate first")
         b = request.get_json(force=True) or {}
         rect = b.get("rect")
         polygon = b.get("polygon") or []
@@ -319,34 +231,6 @@ def create_app(workspace: str | None = None) -> Flask:
                           strokes=b.get("strokes"), polygon=polygon, band_px=float(b.get("band_px", 20)), mode=mode)
         except (cv2.error, ValueError) as e:
             return err(f"segmentation failed: {e}")
-        return jsonify({"mask_px": int((m > 0).sum()), "state": p.state})
-
-    # -------------------------------------------------------- smart select
-    _selector: dict[str, Any] = {}
-
-    @app.get("/api/ai")
-    def ai_status():
-        ok = segment_ai.available(app.config["WORKSPACE"])
-        return jsonify({"smart_select": ok, "models_dir": segment_ai.models_dir(app.config["WORKSPACE"])})
-
-    @app.post("/api/projects/<pid>/smartselect")
-    def smartselect(pid):
-        p = load(pid)
-        if not p.calibration:
-            return err("calibrate first")
-        if not segment_ai.available(app.config["WORKSPACE"]):
-            return err("smart select needs the model files; see `python -m pvsketch models`")
-        b = request.get_json(force=True) or {}
-        try:
-            if "sel" not in _selector:
-                _selector["sel"] = segment_ai.SmartSelector(app.config["WORKSPACE"])
-            m = _selector["sel"].mask(p.id, p.rectified(), b.get("fg", []), b.get("bg", []), b.get("box"))
-        except Exception as e:  # noqa: BLE001 - surface model/runtime problems to the UI
-            return err(f"smart select failed: {e}")
-        m = seg_mod.fill_mask_holes(seg_mod.largest_component(m)) if m.any() else m
-        p.set_mask(m)
-        p.state["segmentation"].update({"mode": "smart", "fg": b.get("fg", []), "bg": b.get("bg", [])})
-        p.save()
         return jsonify({"mask_px": int((m > 0).sum()), "state": p.state})
 
     # ----------------------------------------------------------- outline
@@ -374,8 +258,6 @@ def create_app(workspace: str | None = None) -> Flask:
     @app.get("/api/projects/<pid>/drawing")
     def drawing(pid):
         p = load(pid)
-        if not p.calibration:
-            return err("calibrate first")
         return jsonify(p.drawing().to_dict())
 
     # ------------------------------------------------------- annotations
@@ -390,8 +272,6 @@ def create_app(workspace: str | None = None) -> Flask:
     @app.get("/api/projects/<pid>/export.<fmt>")
     def export(pid, fmt):
         p = load(pid)
-        if not p.calibration:
-            return err("nothing to export yet")
         if request.args.get("lang") in ("en", "nl"):
             p.state["lang"] = request.args["lang"]
         dr = p.drawing() if request.args.get("views") == "0" else p.combined_drawing(app.config["WORKSPACE"])
@@ -416,26 +296,16 @@ def create_app(workspace: str | None = None) -> Flask:
         if fmt == "csv":
             return send_file(io.BytesIO(dimensions_csv(dr).encode("utf-8-sig")), mimetype="text/csv",
                              as_attachment=True, download_name=f"{name}-measurements.csv")
-        if fmt == "png":
+        if fmt in ("png", "jpg", "jpeg"):
             img = drawing_to_png(dr, px_per_mm=4, background=p.rectified() if with_photo else None)
-            ok, buf = cv2.imencode(".png", img)
-            return send_file(io.BytesIO(buf.tobytes()), mimetype="image/png", as_attachment=True,
-                             download_name=f"{name}.png")
+            ext = ".png" if fmt == "png" else ".jpg"
+            ok, buf = cv2.imencode(ext, img, [] if fmt == "png" else [cv2.IMWRITE_JPEG_QUALITY, 90])
+            return send_file(io.BytesIO(buf.tobytes()), mimetype="image/png" if fmt == "png" else "image/jpeg",
+                             as_attachment=True, download_name=f"{name}{ext}")
         if fmt == "json":
             return send_file(p.json_path, mimetype="application/json", as_attachment=True,
                              download_name=f"{name}.pvsketch.json")
         abort(404)
-
-    # ------------------------------------------------------------ marker
-    @app.get("/api/marker/<int:mid>.png")
-    def marker(mid):
-        size = float(request.args.get("size_mm", 100))
-        img, dpi = cal_mod.marker_image(mid, size)
-        from PIL import Image
-        buf = io.BytesIO()
-        Image.fromarray(img).save(buf, format="PNG", dpi=(dpi, dpi))
-        buf.seek(0)
-        return send_file(buf, mimetype="image/png", as_attachment=True, download_name=f"pvsketch-marker-{mid}-{size:g}mm.png")
 
     return app
 
