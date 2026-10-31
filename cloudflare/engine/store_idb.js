@@ -22,6 +22,6 @@
     listStates: () => tx(["states"], "readonly", (t) => req(t.objectStore("states").getAll())),
     getBlob: (id, name) => tx(["blobs"], "readonly", (t) => req(t.objectStore("blobs").get(`${id}/${name}`))).then((v) => v || null),
     putBlob: (id, name, data, mime) => tx(["blobs"], "readwrite", (t) => { t.objectStore("blobs").put({ data, mime }, `${id}/${name}`); }),
-    delProject: (id) => tx(["states", "blobs"], "readwrite", (t) => { t.objectStore("states").delete(id); for (const n of ["orig", "work", "mask"]) t.objectStore("blobs").delete(`${id}/${n}`); }),
+    delProject: (id) => tx(["states", "blobs"], "readwrite", (t) => { t.objectStore("states").delete(id); for (const n of ["orig", "work", "mask", "mask_base"]) t.objectStore("blobs").delete(`${id}/${n}`); }),
   };
 })(globalThis.PV = globalThis.PV || {});

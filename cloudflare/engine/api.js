@@ -55,10 +55,11 @@
       if (sub === "segment" && method === "POST") {
         let rect = body.rect; const polygon = body.polygon || [];
         if (rect && (rect.length !== 4 || rect[2] < 4 || rect[3] < 4)) rect = null;
-        if (!rect && polygon.length < 3) return err("drag a box around the stone or click points along its outer line first");
+        if (!rect && polygon.length < 3 && !st.segmentation && !(body.strokes || []).some((x) => x.kind === "fg")) return err("tap points along the stone, drag a box or paint the stone first");
         try { const n = await p.segment({ rect, fg: body.fg, bg: body.bg, brush_px: parseInt(body.brush_px || 8, 10), iters: parseInt(body.iters || 5, 10), strokes: body.strokes, polygon, band_px: Number(body.band_px === undefined ? 20 : body.band_px), mode: body.mode || "grabcut" }); return ok({ mask_px: n, state: st }); }
         catch (e) { return err(`segmentation failed: ${e.message || e}`); }
       }
+      if (sub === "mask_edits" && method === "PUT") { try { return ok({ mask_px: await p.setEdits(body.edits || []), state: st }); } catch (e) { return err(e.message); } }
       if (sub === "outline" && method === "POST") { if (!(await P().maskMat(pid))) return err("segment first"); try { return ok(await p.outline((body || {}).params)); } catch (e) { return err(e.message); } }
       if (sub === "outline" && method === "PUT") { try { return ok(await p.setOutline(body.outline || [])); } catch (e) { return err(`bad outline: ${e.message}`); } }
       if (sub === "drawing" && method === "GET") return ok(p.drawingDict());

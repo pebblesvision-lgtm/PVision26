@@ -10,7 +10,7 @@
   /** Largest external contour as [[x,y],...] (px, dense) or null. */
   C.outerContour = (mask) => {
     const cv = PV.cv;
-    const src = mask.clone(); const cs = new cv.MatVector(); const hier = new cv.Mat();
+    const src = PV.copyMat(mask); const cs = new cv.MatVector(); const hier = new cv.Mat();
     try {
       cv.findContours(src, cs, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
       let best = -1, bestA = -1;

@@ -29,6 +29,7 @@
   <div id="settings" hidden>
     <label><span data-i18n="set.lang">Language / Taal</span> <select id="lang"><option value="nl">Nederlands</option><option value="en">English</option></select></label>
     <label><input id="set-tips" type="checkbox" checked> <span data-i18n="set.tips">Show explanations</span></label>
+    <label><input id="set-direct" type="checkbox"> <span data-i18n="set.direct">After a new photo go straight to Measure</span></label>
     <div id="project-title" class="muted small"></div>
   </div>
 </header>
@@ -63,13 +64,13 @@
     <!-- 2 isolate -->
     <div class="pane" data-pane="isolate" hidden>
       <h2 data-i18n="iso.h">2. Isolate the stone</h2>
-      <p class="tip" data-i18n="iso.p"><b>Points</b>: tap along the outer line (roughly is fine), then <b>Run</b>. The edge is found inside the band around your points. Or drag a <b>Box</b>. Fix mistakes with the brushes and the <b>Eraser</b>.</p>
+      <button id="btn-skip-measure" class="ghost" style="width:100%" data-i18n="iso.skip">Skip: measure straight on the photo</button>
+      <p class="tip" data-i18n="iso.p">Tap <b>Points</b> around the stone (roughly is fine), drag a <b>Box</b>, or paint the stone with <b>Stone +</b>. Then <b>Run</b>. After that, <b>Stone +</b> and <b>Eraser</b> change the yellow area directly.</p>
       <div class="row tools">
         <button class="tool active" data-tool="points" data-i18n="iso.points">Points</button>
         <button class="tool" data-tool="box" data-i18n="iso.box">Box</button>
-        <button class="tool" data-tool="fg" data-i18n="iso.fg">Stone</button>
-        <button class="tool" data-tool="bg" data-i18n="iso.bg">Background</button>
-        <button class="tool" data-tool="erase" data-i18n="iso.erase">Eraser</button>
+        <button class="tool" data-tool="fg" data-i18n="iso.fg">Stone +</button>
+        <button class="tool" data-tool="bg" data-i18n="iso.erase">Eraser</button>
       </div>
       <div class="row">
         <label><span data-i18n="iso.brush">Brush</span> <input id="brush-size" type="range" min="2" max="80" value="14"> <span id="brush-size-v">14</span> px</label>
@@ -101,9 +102,11 @@
       <div id="ol-result" class="result"></div>
       <div class="row tools">
         <button class="tool active" data-tool="view" data-i18n="ol.view">View</button>
-        <button class="tool" data-tool="edit" data-i18n="ol.edit">Edit vertices</button>
+        <button class="tool" data-tool="move" data-i18n="ol.move">Move</button>
+        <button class="tool" data-tool="add" data-i18n="ol.add">Add point</button>
+        <button class="tool" data-tool="del" data-i18n="ol.del">Delete point</button>
       </div>
-      <p class="tip" data-i18n="ol.editp">Drag vertices, double-tap a line to add one, Alt+click (or select + Delete) to remove. Re-extracting replaces your edits.</p>
+      <p class="tip" data-i18n="ol.editp"><b>Move</b>: drag a point. <b>Add point</b>: tap the line where you want one. <b>Delete point</b>: tap the point. Works on straight lines and curves. Re-extracting replaces your edits.</p>
       <label><input id="show-photo" type="checkbox" checked> <span data-i18n="showphoto">Show photo under the drawing</span></label>
       <details><summary data-i18n="advanced">Advanced</summary>
         <div class="row">
@@ -123,25 +126,31 @@
     <!-- 4 measure -->
     <div class="pane" data-pane="measure" hidden>
       <h2 data-i18n="me.h">4. Measure</h2>
-      <p class="tip" data-i18n="me.p">Tap two points, then type the value you measured. <b>Nothing is measured from the photo.</b> The first value you type sets the scale of the drawing. Drag a dimension line to move it away from the stone.</p>
+      <p class="tip" data-i18n="me.p">Tap two points and type the value you measured. The first value sets the scale.</p>
       <div id="scale-line" class="result"></div>
       <div id="value-entry" hidden>
         <label><span id="value-entry-label"></span>
           <div class="row"><input id="value-input" type="number" inputmode="decimal" step="0.5" placeholder="mm" autocomplete="off"><button id="btn-value-ok" class="primary">OK</button></div>
         </label>
       </div>
-      <label><span data-i18n="me.template">Element template</span> <select id="tpl-select"><option value="">–</option></select></label>
-      <div class="scroll"><table id="checklist" hidden><thead><tr><th data-i18n="me.item">Measurement</th><th>mm</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="row">
+        <label><span data-i18n="me.template">Measurement list</span> <select id="tpl-select"></select></label>
+        <button id="btn-cl-add" class="ghost" style="flex:0 0 auto" data-i18n="me.cladd">+ Measurement</button>
+      </div>
+      <div class="scroll"><table id="checklist" hidden><thead><tr><th data-i18n="me.item">Measurement</th><th>mm</th><th></th><th></th></tr></thead><tbody></tbody></table></div>
       <div class="row tools">
         <button class="tool active" data-tool="aligned" data-i18n="me.aligned">Aligned</button>
         <button class="tool" data-tool="horizontal" data-i18n="me.horizontal">Horizontal</button>
         <button class="tool" data-tool="vertical" data-i18n="me.vertical">Vertical</button>
         <button class="tool" data-tool="label" data-i18n="me.label">Text</button>
+        <button class="tool" data-tool="select" data-i18n="me.select">Select</button>
       </div>
-      <div class="row">
+      <p id="me-tool-hint" class="tip small"></p>
+      <div class="row wrap">
         <label class="inline"><input id="snap" type="checkbox" checked> <span data-i18n="me.snap">Snap</span></label>
         <label class="inline"><span data-i18n="line">Line</span> <select id="dim-style"><option value="solid" data-i18n="solid">solid</option><option value="dashed" data-i18n="dashed">dashed</option><option value="dotted" data-i18n="dotted">dotted</option></select></label>
-        <button id="btn-tidy" class="ghost" data-i18n="me.tidy">Tidy up</button>
+        <button id="btn-dim-del" class="ghost" disabled data-i18n="me.del">Delete selected</button>
+        <button id="btn-tidy" class="ghost" data-i18n="me.tidy">Arrange lines</button>
       </div>
       <div class="scroll"><table id="dim-table"><thead><tr><th>#</th><th data-i18n="label">Label</th><th data-i18n="me.value">mm</th><th data-i18n="me.off">Off.</th><th></th><th></th><th></th></tr></thead><tbody></tbody></table>
       <ul id="label-list" class="list"></ul></div>
@@ -156,7 +165,9 @@
         <button class="tool" data-tool="line" data-i18n="dr.line">Line</button>
         <button class="tool" data-tool="arrow" data-i18n="dr.arrow">Arrow + text</button>
         <button class="tool" data-tool="text" data-i18n="dr.text">Text</button>
+        <button class="tool" data-tool="select" data-i18n="dr.select">Select</button>
       </div>
+      <p id="dr-tool-hint" class="tip small"></p>
       <div id="dr-region-opts">
         <label><span data-i18n="dr.kind">Finish</span> <select id="fin-kind"></select></label>
         <div class="row">
@@ -171,6 +182,7 @@
       </div>
       <div class="row">
         <button id="btn-dr-cancel" class="ghost" data-i18n="cancel">Cancel</button>
+        <button id="btn-dr-del" class="ghost" hidden data-i18n="me.del">Delete selected</button>
         <button id="btn-dr-close" class="primary big" data-i18n="dr.close">Close region / end line</button>
       </div>
       <div class="scroll"><table id="fin-table"><thead><tr><th>#</th><th data-i18n="dr.kind">Finish</th><th data-i18n="dr.strokes_s">/10cm</th><th data-i18n="dr.comment_s">Comment</th><th></th></tr></thead><tbody></tbody></table>

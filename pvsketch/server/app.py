@@ -224,13 +224,23 @@ def create_app(workspace: str | None = None) -> Flask:
         mode = b.get("mode", "grabcut")
         if rect and (len(rect) != 4 or rect[2] < 4 or rect[3] < 4):
             rect = None
-        if not rect and len(polygon) < 3:
-            return err("drag a box around the stone or click points along its outer line first")
+        if not rect and len(polygon) < 3 and not p.state.get("segmentation") and not any(x.get("kind") == "fg" for x in (b.get("strokes") or [])):
+            return err("tap points along the stone, drag a box or paint the stone first")
         try:
             m = p.segment(rect, b.get("fg", []), b.get("bg", []), int(b.get("brush_px", 8)), int(b.get("iters", 5)),
                           strokes=b.get("strokes"), polygon=polygon, band_px=float(b.get("band_px", 20)), mode=mode)
         except (cv2.error, ValueError) as e:
             return err(f"segmentation failed: {e}")
+        return jsonify({"mask_px": int((m > 0).sum()), "state": p.state})
+
+    @app.put("/api/projects/<pid>/mask_edits")
+    def mask_edits(pid):
+        p = load(pid)
+        b = request.get_json(force=True) or {}
+        try:
+            m = p.set_edits(b.get("edits") or [])
+        except ValueError as e:
+            return err(str(e))
         return jsonify({"mask_px": int((m > 0).sum()), "state": p.state})
 
     # ----------------------------------------------------------- outline

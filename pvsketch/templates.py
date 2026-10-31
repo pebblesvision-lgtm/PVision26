@@ -12,6 +12,18 @@ from typing import Any
 
 # item: key, nl, en, kind (horizontal | vertical | aligned | value), hint_nl, hint_en
 ELEMENT_TEMPLATES: dict[str, dict[str, Any]] = {
+    "vrij": {
+        "nl": "Vrij (eigen lijst)", "en": "Free (own list)",
+        "items": [],
+    },
+    "standaard": {
+        "nl": "Standaard (lengte, breedte, diepte)", "en": "Standard (length, width, depth)",
+        "items": [
+            ("lengte", "Lengte", "Length", "horizontal", "", ""),
+            ("breedte", "Breedte", "Width", "vertical", "", ""),
+            ("diepte", "Diepte", "Depth", "value", "", ""),
+        ],
+    },
     "raamdorpel": {
         "nl": "Raamdorpel", "en": "Window sill (exterior)",
         "items": [
@@ -100,10 +112,6 @@ ELEMENT_TEMPLATES: dict[str, dict[str, Any]] = {
             ("hoogte_hals", "Hoogte hals", "Neck height", "vertical", "", ""),
             ("doorn", "Doorn / pen", "Dowel", "value", "diameter en lengte", "diameter and length"),
         ],
-    },
-    "vrij": {
-        "nl": "Vrij (eigen lijst)", "en": "Free (own list)",
-        "items": [],
     },
 }
 

@@ -66,7 +66,7 @@ table select { background: #12151a; color: var(--fg); border: 1px solid var(--li
 table .x { color: var(--bad); cursor: pointer; font-size: 18px; padding: 4px 8px; }
 table .scale-btn { padding: 2px 8px; min-height: 32px; font-size: 13px; }
 tr.hl td { background: #2a2419; }
-.w-lbl { width: 110px; } .w-num { width: 84px; } .w-off { width: 60px; }
+.w-lbl { width: 84px; } .w-num { width: 72px; } .w-off { width: 60px; }
 #checklist tr.done td:first-child::before { content: "✓ "; color: var(--ok); }
 #checklist tr.armed td { background: #2a2419; }
 #checklist .hint { color: var(--muted); font-size: 12px; }
@@ -95,3 +95,6 @@ label.inline select { width: auto; margin: 0; }
 @media (pointer: coarse) { nav#steps .step { min-height: 48px; } }
 
 .static-only { display: none; } body.static-app .static-only { display: block; } body.static-app .flask-only { display: none; }
+li.hl { background: #2a2419; }
+.row.wrap { flex-wrap: wrap; align-items: center; } .row.wrap > * { flex: 1 1 auto; }
+#dim-table .sty { width: 52px; }

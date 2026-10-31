@@ -63,7 +63,7 @@
   }
   S.largestComponent = largestComponent; S.fillHoles = fillHoles;
 
-  /** Independent copy of a rectangle (roi().clone() shares memory in this OpenCV.js build, so copy rows by hand). */
+  /** Independent copy of a rectangle (roi()__CLONE__ shares memory in this OpenCV.js build, so copy rows by hand). */
   function cropCopy(mat, r, ch) {
     const cv = PV.cv; const out = new cv.Mat(r.height, r.width, ch === 3 ? cv.CV_8UC3 : cv.CV_8UC1);
     const src = mat.data, dst = out.data, sw = mat.cols * ch, rw = r.width * ch;
@@ -80,21 +80,38 @@
     const mask = new cv.Mat(wh, ww, cv.CV_8UC1, new cv.Scalar(cv.GC_BGD));
     let gcRect;
     try {
-      if (polygon && polygon.length >= 3) {
-        const poly = polygonMask(ww, wh, polygon, scale); const band = Math.max(2, Math.round((o.bandPx || 20) * scale));
+      let region = null;
+      if (polygon && polygon.length >= 3) region = polygonMask(ww, wh, polygon, scale);
+      else if (o.region) { region = new cv.Mat(); cv.resize(o.region, region, new cv.Size(ww, wh), 0, 0, cv.INTER_NEAREST); const rd = region.data; for (let i = 0; i < rd.length; i++) rd[i] = rd[i] ? 255 : 0; }
+      if (region && o.seed) {
+        // only painted stone: the paint is certain, the rest of the photo "probably background";
+        // GrabCut grows the stone outwards from the paint
+        // paint may overshoot the edge, so only its core is certain
+        const dIn = new cv.Mat(); cv.distanceTransform(region, dIn, cv.DIST_L2, 5);
+        const pd = region.data, di = dIn.data32F, md = mask.data; let maxIn = 0;
+        for (let i = 0; i < di.length; i++) if (pd[i] && di[i] > maxIn) maxIn = di[i];
+        for (let i = 0; i < md.length; i++) md[i] = !pd[i] ? cv.GC_PR_BGD : di[i] >= 0.6 * maxIn ? cv.GC_FGD : cv.GC_PR_FGD;
+        region.delete(); dIn.delete(); if (!maxIn) throw new Error("empty selection");
+        gcRect = new cv.Rect(0, 0, ww, wh);
+      } else if (region) {
+        // points / paint are a rough guess: inside = "probably stone", only the deep core is certain
+        const band = Math.max(2, Math.round((o.bandPx || 20) * scale));
         const inv = new cv.Mat(), dIn = new cv.Mat(), dOut = new cv.Mat();
-        cv.bitwise_not(poly, inv); cv.distanceTransform(poly, dIn, cv.DIST_L2, 5); cv.distanceTransform(inv, dOut, cv.DIST_L2, 5);
-        const pd = poly.data, di = dIn.data32F, dout = dOut.data32F, md = mask.data;   // fresh views, no allocation below
+        cv.bitwise_not(region, inv); cv.distanceTransform(region, dIn, cv.DIST_L2, 5); cv.distanceTransform(inv, dOut, cv.DIST_L2, 5);
+        const pd = region.data, di = dIn.data32F, dout = dOut.data32F, md = mask.data;   // fresh views, no allocation below
+        let maxIn = 0; for (let i = 0; i < di.length; i++) if (pd[i] && di[i] > maxIn) maxIn = di[i];
+        const core = Math.max(band, 0.6 * maxIn);
         let x0 = ww, y0 = wh, x1 = 0, y1 = 0;
         for (let y = 0; y < wh; y++) for (let x = 0; x < ww; x++) {
           const i = y * ww + x; const inside = pd[i] > 0;
-          if (inside && di[i] > band) md[i] = cv.GC_FGD;
+          if (inside && di[i] > core) md[i] = cv.GC_FGD;
           else if (inside) md[i] = cv.GC_PR_FGD;
           else if (dout[i] <= band) md[i] = cv.GC_PR_BGD;
           if (inside || dout[i] <= band) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
         }
+        if (x1 < x0) throw new Error("empty selection");
         gcRect = new cv.Rect(x0, y0, Math.max(1, x1 - x0 + 1), Math.max(1, y1 - y0 + 1));
-        poly.delete(); inv.delete(); dIn.delete(); dOut.delete();
+        region.delete(); inv.delete(); dIn.delete(); dOut.delete();
       } else if (rect) {
         let [x, y, rw, rh] = rect.map(Number);
         const cx0 = Math.max(0, Math.min(ww - 2, Math.round(x * scale))), cy0 = Math.max(0, Math.min(wh - 2, Math.round(y * scale)));
@@ -102,11 +119,12 @@
         gcRect = new cv.Rect(cx0, cy0, cx1 - cx0, cy1 - cy0);
         const md = mask.data;
         for (let yy = cy0; yy < cy1; yy++) for (let xx = cx0; xx < cx1; xx++) md[yy * ww + xx] = cv.GC_PR_FGD;
-      } else throw new Error("need a box or a polygon");
+      } else throw new Error("need a box, points or painted stone");
 
       const layer = strokes.length ? S.strokeLayer(ww, wh, strokes, scale) : null;
       let md = mask.data;
-      if (layer) for (let i = 0; i < md.length; i++) { if (layer[i] === LBL_FG) md[i] = cv.GC_FGD; else if (layer[i] === LBL_BG) md[i] = cv.GC_BGD; }
+      const seed = !!o.seed;   // seed: the paint was handled above (it may overshoot)
+      if (layer) for (let i = 0; i < md.length; i++) { if (layer[i] === LBL_FG && !seed) md[i] = cv.GC_FGD; else if (layer[i] === LBL_BG) md[i] = cv.GC_BGD; }
       let hasFg = false, hasBg = false; for (let i = 0; i < md.length; i++) { const v = md[i]; if (v === cv.GC_FGD || v === cv.GC_PR_FGD) hasFg = true; else hasBg = true; if (hasFg && hasBg) break; }
       if (!hasFg || !hasBg) throw new Error("the box/polygon must leave some background around the stone");
 
@@ -117,7 +135,7 @@
       const cropR = new cv.Rect(cx0, cy0, cx1 - cx0, cy1 - cy0);
       const workC = cropCopy(work, cropR, 3), maskC = cropCopy(mask, cropR, 1);
       let okC = false; { const mc = maskC.data; let f = false, b = false; for (let i = 0; i < mc.length; i++) { if (mc[i] === cv.GC_FGD || mc[i] === cv.GC_PR_FGD) f = true; else b = true; if (f && b) { okC = true; break; } } }
-      const useMode = !polygon && !layer ? cv.GC_INIT_WITH_RECT : cv.GC_INIT_WITH_MASK;
+      const useMode = !polygon && !o.region && !layer ? cv.GC_INIT_WITH_RECT : cv.GC_INIT_WITH_MASK;
       if (okC) {
         cv.grabCut(workC, maskC, new cv.Rect(gcRect.x - cx0, gcRect.y - cy0, gcRect.width, gcRect.height), bgd, fgd, iters, useMode);
         const md2 = mask.data, mc2 = maskC.data, cw = cx1 - cx0, chh = cy1 - cy0;
@@ -129,7 +147,7 @@
       for (let i = 0; i < md.length; i++) od[i] = md[i] === cv.GC_FGD || md[i] === cv.GC_PR_FGD ? 255 : 0;
       const k5 = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5, 5)), opened = new cv.Mat();
       cv.morphologyEx(out, opened, cv.MORPH_OPEN, k5); out.delete(); k5.delete(); out = opened;
-      if (layer) { const d2 = out.data; for (let i = 0; i < d2.length; i++) { if (layer[i] === LBL_FG) d2[i] = 255; else if (layer[i] === LBL_BG) d2[i] = 0; } }
+      if (layer) { const d2 = out.data; for (let i = 0; i < d2.length; i++) { if (layer[i] === LBL_FG && !seed) d2[i] = 255; else if (layer[i] === LBL_BG) d2[i] = 0; } }
       out = largestComponent(out); out = fillHoles(out);
       if (scale !== 1) {
         const big = new cv.Mat(); cv.resize(out, big, new cv.Size(W, H), 0, 0, cv.INTER_LINEAR); out.delete();
@@ -138,6 +156,15 @@
       return out;
     } finally { mask.delete(); if (ownWork) work.delete(); }
   };
+
+  /** Brush edits after a run: stone adds to the mask, background (gum) removes. Returns a new Mat. */
+  S.applyEdits = (base, edits) => {
+    const m = PV.copyMat(base); if (!edits || !edits.length) return m;
+    const layer = S.strokeLayer(m.cols, m.rows, edits, 1), d = m.data;
+    for (let i = 0; i < d.length; i++) { if (layer[i] === LBL_FG) d[i] = 255; else if (layer[i] === LBL_BG) d[i] = 0; }
+    return m;
+  };
+  S.LBL_FG = LBL_FG;
 
   /** No GrabCut: the clicked polygon is the mask; strokes still add/remove. */
   S.exactPolygon = (w, h, polygon, strokes = []) => {
@@ -157,7 +184,7 @@
       out[4 * i] = m ? src[3 * i] * (1 - a) + tint[0] * a : src[3 * i]; out[4 * i + 1] = m ? src[3 * i + 1] * (1 - a) + tint[1] * a : src[3 * i + 1];
       out[4 * i + 2] = m ? src[3 * i + 2] * (1 - a) + tint[2] * a : src[3 * i + 2]; out[4 * i + 3] = 255;
     }
-    const cs = new cv.MatVector(), hier = new cv.Mat(), clone = mask.clone();
+    const cs = new cv.MatVector(), hier = new cv.Mat(), clone = PV.copyMat(mask);
     try {
       cv.findContours(clone, cs, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
       const rgba = cv.matFromArray(h, w, cv.CV_8UC4, Array.from(out)); const rgb = new cv.Mat();

@@ -33,10 +33,10 @@ scherm laadt een synthetische teststeen.
 | Stap | Wat | Opmerkingen |
 |---|---|---|
 | 1 Foto | Foto maken (telefoon/tablet) of kiezen | JPEG, PNG, HEIC. Recht van voren fotograferen |
-| 2 Isoleren | **Punten** langs de buitenlijn tikken, *Uitvoeren* | GrabCut zoekt de rand alleen in de band rond uw punten. Kwasten steen/achtergrond, gum, ongedaan maken. *Punten exact* = geen GrabCut |
-| 3 Omtrek | Vereenvoudigen + **bogen passen** | Punten verplaatsen, toevoegen (dubbeltik), verwijderen. Optioneel detaillijnen |
-| 4 Opmeten | Twee punten tikken → **maat intypen** | De eerste maat zet de schaal (⌖ bij een maat: deze als schaal gebruiken). Schuin / horizontaal / verticaal, maatlijn slepen, *Opruimen*. **Elementsjabloon** (raamdorpel, vensterbank, dorpel, muurafdekker, traptrede, gevelband, ornament, pinakel) geeft de checklist van verplichte maten; wat niet op de foto staat typt u direct |
-| 5 Tekenen | **Bewerkingsvlakken** met arcering | gefrijnd schuin/verticaal/horizontaal, gescharreerd, gegradineerd, kathedraalslag, vrije kathedraalslag, gebouchardeerd, gespitst, randslag, gezoet, gepolijst, gezaagd, gevlamd, geschuurd. Per vlak: **slagen per 10 cm** en een opmerking; beide komen in de legenda. Lijnen, pijlen, tekst |
+| 2 Isoleren | **Punten** rond de steen, een **Kader**, of de steen verven met **Steen +**, dan *Uitvoeren* | Na het uitvoeren werken *Steen +* en *Gum* direct op het gele vlak (ongedaan maken werkt). *Punten exact* = geen GrabCut. *Overslaan* = direct opmeten op de foto (instelling: na een nieuwe foto altijd direct naar Opmeten) |
+| 3 Omtrek | Vereenvoudigen + **bogen passen** | *Verplaatsen*, *Punt toevoegen*, *Punt verwijderen*, ook op bogen (blauwe punten). Optioneel detaillijnen |
+| 4 Opmeten | Twee punten tikken → **maat intypen** | De eerste maat zet de schaal (⌖ bij een maat: deze als schaal gebruiken). Schuin (langs de lijn) / horizontaal (alleen breedte) / verticaal (alleen hoogte), *Selecteren* om een maatlijn te wijzigen (lijnstijl) of te verwijderen, *Maatlijnen ordenen*. **Maatlijst**: *Vrij* (standaard), *Standaard* (lengte, breedte, diepte) of een element (raamdorpel, vensterbank, …); *+ Maat* voegt een eigen maat toe, ✕ haalt hem weg |
+| 5 Tekenen | **Bewerkingsvlakken** met arcering | gefrijnd schuin/verticaal/horizontaal, gescharreerd, gegradineerd, kathedraalslag, vrije kathedraalslag, gebouchardeerd, gespitst, randslag, gezoet, gepolijst, gezaagd, gevlamd, geschuurd. Per vlak: **slagen per 10 cm** en een opmerking; beide komen in de legenda. Lijnen, pijlen, tekst. *Selecteren*: een bestaand vlak of lijn achteraf wijzigen of verwijderen |
 | 6 Exporteren | **PDF** (ware grootte A4/A3, anders 1:2 / 1:5), **PNG / JPEG**, DXF 2010 en R12, SVG, CSV | Titelblok: project, element, steensoort, aantal, afwerking, getekend door. Andere aanzichten (zijaanzicht, profiel, …) koppelen aan hetzelfde blad |
 
 Zolang er nog geen maat is ingevoerd staat op elke export **NIET OP SCHAAL**.
@@ -70,7 +70,7 @@ Goed om te weten:
 - Projecten staan **in de browser van dat apparaat**. Maak een back-up via Exporteren → JSON (bevat foto, omtrek, maten en bewerkingen) en open die met *Project openen (.json)*; zo verhuist u ook een project naar een ander apparaat.
 - Safari kan data van sites die u lang niet gebruikt opruimen; installeren op het beginscherm voorkomt dat grotendeels.
 - DXF is hier R12 (werkt in vrijwel elk CAD/CAM-pakket, maatlijnen als losse lijnen en tekst).
-- Bouwen: `python tools/build_cloudflare.py` (alleen nodig na wijzigingen aan de code; het haalt OpenCV.js via `npm install` in `web/`). Test: `python3 -m http.server 5077` in `cloudflare/`, dan `node web/tests/drive_static.js`.
+- Bouwen: `python tools/build_cloudflare.py` (alleen nodig na wijzigingen aan de code; het haalt OpenCV.js via `npm install` in `web/`). Test: `python3 -m http.server 5077` in `cloudflare/`, dan `node web/tests/drive_static.js` en `node web/tests/drive_edit.js`.
 
 ## Als serverapp (Python, optioneel)
 

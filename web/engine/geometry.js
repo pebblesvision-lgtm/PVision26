@@ -9,6 +9,8 @@
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
   G.dist = dist;
   G.clone = (x) => JSON.parse(JSON.stringify(x));
+  /** Independent copy of a cv.Mat (Mat.clone() shares memory in this OpenCV.js build). */
+  PV.copyMat = (src) => { const cv = PV.cv; const dst = new cv.Mat(src.rows, src.cols, src.type()); dst.data.set(src.data); return dst; };
   /** Python's "%g": up to 6 significant digits, no trailing zeros. */
   G.fmtG = (v) => String(+Number(v).toPrecision(6));
   const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
@@ -152,8 +154,11 @@
   G.translateDrawing = (dr, dx, dy) => G.mapDrawing(dr, (p) => [p[0] + dx, p[1] + dy], 1);
   /** bbox of outline + dimension lines + finishes + labels + sketches */
   G.extent = (dr) => {
-    const bb = (G.outlineBBox(dr.outline) || [0, 0, dr.width_mm, dr.height_mm]).slice();
+    const ob = G.outlineBBox(dr.outline);
+    const hasOther = dr.dimensions.length || dr.finishes.length || dr.labels.length || dr.sketches.length;
+    const bb = ob ? ob.slice() : hasOther ? [Infinity, Infinity, -Infinity, -Infinity] : [0, 0, dr.width_mm, dr.height_mm];
     const add = (p) => { bb[0] = Math.min(bb[0], p[0]); bb[1] = Math.min(bb[1], p[1]); bb[2] = Math.max(bb[2], p[0]); bb[3] = Math.max(bb[3], p[1]); };
+    for (const d of dr.dimensions) add(d.p1), add(d.p2);
     for (const d of dr.dimensions) for (const q of G.dimGeometry(d).line) add(q);
     for (const f of dr.finishes) f.polygon.forEach(add);
     for (const l of dr.labels) add(l.pos);

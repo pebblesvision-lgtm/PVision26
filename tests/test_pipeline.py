@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 
+import cv2
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -138,11 +139,36 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue(any(l.text == "Zijaanzicht" for l in comb.labels))
         self.assertEqual(drawing_to_svg(comb).count(" Z M "), 1)
 
+    def test_loose_polygon_paint_and_edits(self):
+        """Loose points far outside the stone must not make the background stone;
+        painting the stone alone is enough to run; brush edits change the result."""
+        img = np.full((400, 600, 3), (220, 210, 200), np.uint8)                  # light sky
+        cv2.ellipse(img, (300, 210), (110, 150), 0, 0, 360, (90, 100, 95), -1)   # grey-green stone
+        img = (img.astype(np.int16) + np.random.default_rng(1).integers(-12, 12, img.shape)).clip(0, 255).astype(np.uint8)
+        truth = np.zeros((400, 600), np.uint8); cv2.ellipse(truth, (300, 210), (110, 150), 0, 0, 360, 255, -1)
+        path = os.path.join(self.tmp.name, "ell.png"); cv2.imwrite(path, img)
+        p = Project.from_path(path, root=os.path.join(self.tmp.name, "ws3"))
+        iou = lambda m: ((m > 0) & (truth > 0)).sum() / ((m > 0) | (truth > 0)).sum()
+        loose = [[120, 30], [480, 20], [520, 380], [90, 390]]                      # far too big
+        m = p.segment(polygon=loose, band_px=12)
+        self.assertGreater(iou(m), 0.9, "loose polygon swallowed the background")
+        p2 = Project.from_path(path, root=os.path.join(self.tmp.name, "ws3"))
+        paint = [{"kind": "fg", "pts": [[300, 80], [300, 340]], "r": 120}]          # overshooting paint only
+        m2 = p2.segment(strokes=paint, band_px=12)
+        self.assertGreater(iou(m2), 0.85)
+        before = int((m2 > 0).sum())
+        m3 = p2.set_edits([{"kind": "bg", "pts": [[300, 60], [300, 120]], "r": 30}])
+        self.assertLess(int((m3 > 0).sum()), before)
+        self.assertIsNone(p2.state["outline"])
+        m4 = p2.set_edits([])                                                     # undo = fewer edits
+        self.assertEqual(int((m4 > 0).sum()), before)
+
     def test_templates(self):
         from pvsketch.templates import checklist_from_template, ELEMENT_TEMPLATES, templates_json
         cl = checklist_from_template("raamdorpel")
         self.assertTrue(any(c["key"] == "lengte" for c in cl)); self.assertIn("vrij", ELEMENT_TEMPLATES)
-        self.assertEqual(templates_json("en")[0]["items"][0]["hint"], "incl. built-in tails")
+        self.assertEqual(templates_json("en")[2]["items"][0]["hint"], "incl. built-in tails")
+        self.assertEqual(list(ELEMENT_TEMPLATES)[:2], ["vrij", "standaard"])
 
 
 class ServerTest(unittest.TestCase):
@@ -165,7 +191,7 @@ class ServerTest(unittest.TestCase):
             bb = r.get_json()["bbox"]
             r = c.put(f"/api/projects/{pid}/outline", json={"outline": r.get_json()["outline"]}); self.assertEqual(r.status_code, 200)
             # template + measurement + scale
-            self.assertEqual(c.get("/api/templates?lang=nl").get_json()[0]["name"], "Raamdorpel")
+            self.assertEqual(c.get("/api/templates?lang=nl").get_json()[2]["name"], "Raamdorpel")
             cl = c.put(f"/api/projects/{pid}/template", json={"template": "raamdorpel"}).get_json()["checklist"]
             cl[1]["value_mm"] = 240
             r = c.put(f"/api/projects/{pid}/annotations", json={"dimensions": [{"p1": [bb[0], bb[3]], "p2": [bb[2], bb[3]], "kind": "horizontal", "manual_mm": 300, "label": "lengte"}], "labels": [], "checklist": cl})

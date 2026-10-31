@@ -96,7 +96,7 @@ class Project:
             "sketches": [],
             "titleblock": {},
             "lang": "nl",
-            "template": "",
+            "template": "vrij",
             "checklist": [],
             "views": [],            # [{"project": id, "name": "side"|"top"|"profile"|free text}]
         }
@@ -266,22 +266,49 @@ class Project:
     # ----------------------------------------------------------- segmentation
     def segment(self, rect=None, fg=(), bg=(), brush_px: int = 8, iters: int = 5, strokes=None,
                 polygon=None, band_px: float = 20.0, mode: str = "grabcut") -> np.ndarray:
-        """Run GrabCut (box and/or polygon guided, with strokes) or take the
-        polygon as the exact mask (``mode="polygon"``)."""
+        """Run GrabCut guided by points, a box, the current result or painted stone,
+        or take the points as the exact mask (``mode="polygon"``)."""
         img = self.rectified()
         st = seg_mod.normalise_strokes(fg, bg, strokes, brush_px)
         poly = [list(map(float, p)) for p in (polygon or [])]
+        prev = self.mask()
         if mode == "polygon":
             if len(poly) < 3:
                 raise ValueError("click at least 3 points along the outer line first")
             m = seg_mod.exact_polygon(img.shape, poly, st)
+        elif len(poly) >= 3 or rect:
+            m = seg_mod.grabcut(img, rect, st, polygon=poly if len(poly) >= 3 else None, band_px=band_px, iters=iters)
+        elif prev is not None:
+            m = seg_mod.grabcut(img, None, st, region=prev, band_px=band_px, iters=iters)
+        elif any(s["kind"] == "fg" for s in st):
+            layer = seg_mod.stroke_layer(img.shape[:2], st)
+            region = np.where(layer == seg_mod.LBL_FG, 255, 0).astype(np.uint8)
+            m = seg_mod.grabcut(img, None, st, region=region, band_px=band_px, iters=iters, seed=True)
         else:
-            m = seg_mod.grabcut(img, rect, st, polygon=poly if len(poly) >= 3 else None,
-                                band_px=band_px, iters=iters)
+            raise ValueError("tap points along the stone, drag a box or paint the stone first")
         self._invalidate_from("segmentation")
         self.state["segmentation"] = {"rect": ([float(v) for v in rect] if rect else None),
-                                      "polygon": poly, "strokes": st, "brush_px": brush_px,
+                                      "polygon": poly, "strokes": st, "edits": [], "brush_px": brush_px,
                                       "iters": iters, "band_px": band_px, "mode": mode}
+        cv2.imwrite(os.path.join(self.dir, "mask.png"), m)
+        cv2.imwrite(os.path.join(self.dir, "mask_base.png"), m)
+        self._cache["mask"] = m
+        self.save()
+        return m
+
+    def set_edits(self, edits) -> np.ndarray:
+        """Brush edits after a run, applied to the last GrabCut result (so undo = send fewer edits)."""
+        if not self.state.get("segmentation"):
+            raise ValueError("run first")
+        bp = os.path.join(self.dir, "mask_base.png")
+        base = cv2.imread(bp, cv2.IMREAD_GRAYSCALE) if os.path.isfile(bp) else self.mask()
+        if base is None:
+            raise ValueError("run first")
+        ed = seg_mod.normalise_strokes((), (), edits, 8)
+        m = seg_mod.apply_edits(base, ed)
+        self.state["segmentation"]["edits"] = ed
+        self.state["outline"] = None
+        self.state["detail"] = None
         cv2.imwrite(os.path.join(self.dir, "mask.png"), m)
         self._cache["mask"] = m
         self.save()
@@ -392,7 +419,7 @@ class Project:
                     continue
                 v = c.get("value_mm")
                 cl.append({"key": str(c["key"])[:40], "nl": str(c.get("nl", ""))[:80], "en": str(c.get("en", ""))[:80],
-                           "kind": c.get("kind") if c.get("kind") in ("horizontal", "vertical", "aligned", "value") else "value",
+                           "kind": c.get("kind") if c.get("kind") in ("horizontal", "vertical", "aligned", "value", "any") else "value",
                            "hint": str(c.get("hint", ""))[:120], "hint_nl": str(c.get("hint_nl", c.get("hint", "")))[:120],
                            "hint_en": str(c.get("hint_en", c.get("hint", "")))[:120],
                            "value_mm": (None if v in (None, "") else float(v)), "dim_id": str(c.get("dim_id", ""))[:8]})

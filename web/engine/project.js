@@ -51,7 +51,7 @@
     return {
       id, name: "", created: iso(), original: null, image_size: null, calibration: null, segmentation: null,
       outline_params: clone(PV.DEFAULT_OUTLINE_PARAMS), outline: null, detail: null, dimensions: [], labels: [], finishes: [], sketches: [],
-      titleblock: {}, lang: "nl", template: "", checklist: [], views: [],
+      titleblock: {}, lang: "nl", template: "vrij", checklist: [], views: [],
     };
   }
   P.create = async (bytes, filename, mime) => {
@@ -123,12 +123,37 @@
       const cv = PV.cv, img = await workMat(this.id), seg = PV.segment;
       const strokes = seg.normaliseStrokes(o.fg, o.bg, o.strokes, o.brush_px || 8);
       const poly = (o.polygon || []).map((p) => [Number(p[0]), Number(p[1])]); const mode = o.mode || "grabcut";
+      const band = o.band_px === undefined ? 20 : o.band_px, iters = o.iters || 5;
       let m;
       if (mode === "polygon") { if (poly.length < 3) throw new Error("click at least 3 points along the outer line first"); m = seg.exactPolygon(img.cols, img.rows, poly, strokes); }
-      else m = seg.grabcut(img, { rect: o.rect, strokes, polygon: poly.length >= 3 ? poly : null, bandPx: o.band_px === undefined ? 20 : o.band_px, iters: o.iters || 5 });
+      else if (poly.length >= 3 || o.rect) m = seg.grabcut(img, { rect: o.rect, strokes, polygon: poly.length >= 3 ? poly : null, bandPx: band, iters });
+      else {
+        const prev = await maskMat(this.id);
+        if (prev) { const reg = PV.copyMat(prev); m = seg.grabcut(img, { strokes, region: reg, bandPx: band, iters }); reg.delete(); }
+        else if (strokes.some((s) => s.kind === "fg")) {
+          const layer = seg.strokeLayer(img.cols, img.rows, strokes, 1), reg = new cv.Mat(img.rows, img.cols, cv.CV_8UC1); const rd = reg.data;
+          for (let i = 0; i < rd.length; i++) rd[i] = layer[i] === seg.LBL_FG ? 255 : 0;
+          m = seg.grabcut(img, { strokes, region: reg, bandPx: band, iters, seed: true }); reg.delete();
+        } else throw new Error("tap points along the stone, drag a box or paint the stone first");
+      }
       useCache(this.id); if (cache.mask) cache.mask.delete(); cache.mask = m;
       this.state.outline = null; this.state.detail = null; this.state.outline_edited = false;
-      this.state.segmentation = { rect: o.rect ? o.rect.map(Number) : null, polygon: poly, strokes, brush_px: o.brush_px || 8, iters: o.iters || 5, band_px: o.band_px === undefined ? 20 : o.band_px, mode };
+      this.state.segmentation = { rect: o.rect ? o.rect.map(Number) : null, polygon: poly, strokes, edits: [], brush_px: o.brush_px || 8, iters, band_px: band, mode };
+      const png = await PV.io.encodeGray(m.data, m.cols, m.rows);
+      await PV.store.putBlob(this.id, "mask", png, "image/png"); await PV.store.putBlob(this.id, "mask_base", png, "image/png");
+      await this.save();
+      let n = 0; const d = m.data; for (let i = 0; i < d.length; i++) if (d[i]) n++;
+      return n;
+    }
+    /** Brush edits after a run, applied to the last GrabCut result (undo = send fewer edits). */
+    async setEdits(edits) {
+      if (!this.state.segmentation) throw new Error("run first");
+      const cv = PV.cv; const b = (await PV.store.getBlob(this.id, "mask_base")) || (await PV.store.getBlob(this.id, "mask"));
+      if (!b) throw new Error("run first");
+      const g = await PV.io.decodeGray(b.data), base = new cv.Mat(g.h, g.w, cv.CV_8UC1); base.data.set(g.data);
+      const ed = PV.segment.normaliseStrokes([], [], edits, 8), m = PV.segment.applyEdits(base, ed); base.delete();
+      useCache(this.id); if (cache.mask) cache.mask.delete(); cache.mask = m;
+      this.state.segmentation.edits = ed; this.state.outline = null; this.state.detail = null;
       await PV.store.putBlob(this.id, "mask", await PV.io.encodeGray(m.data, m.cols, m.rows), "image/png");
       await this.save();
       let n = 0; const d = m.data; for (let i = 0; i < d.length; i++) if (d[i]) n++;
@@ -165,7 +190,7 @@
       if (checklist) {
         st.checklist = checklist.filter((c) => c && c.key).map((c) => ({
           key: String(c.key).slice(0, 40), nl: String(c.nl || "").slice(0, 80), en: String(c.en || "").slice(0, 80),
-          kind: ["horizontal", "vertical", "aligned", "value"].includes(c.kind) ? c.kind : "value", hint: String(c.hint || "").slice(0, 120),
+          kind: ["horizontal", "vertical", "aligned", "value", "any"].includes(c.kind) ? c.kind : "value", hint: String(c.hint || "").slice(0, 120),
           hint_nl: String(c.hint_nl === undefined ? c.hint || "" : c.hint_nl).slice(0, 120), hint_en: String(c.hint_en === undefined ? c.hint || "" : c.hint_en).slice(0, 120),
           value_mm: c.value_mm === null || c.value_mm === undefined || c.value_mm === "" ? null : Number(c.value_mm), dim_id: String(c.dim_id || "").slice(0, 8),
         }));

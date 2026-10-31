@@ -187,6 +187,41 @@
   }
  },
  "ELEMENT_TEMPLATES": {
+  "vrij": {
+   "nl": "Vrij (eigen lijst)",
+   "en": "Free (own list)",
+   "items": []
+  },
+  "standaard": {
+   "nl": "Standaard (lengte, breedte, diepte)",
+   "en": "Standard (length, width, depth)",
+   "items": [
+    [
+     "lengte",
+     "Lengte",
+     "Length",
+     "horizontal",
+     "",
+     ""
+    ],
+    [
+     "breedte",
+     "Breedte",
+     "Width",
+     "vertical",
+     "",
+     ""
+    ],
+    [
+     "diepte",
+     "Diepte",
+     "Depth",
+     "value",
+     "",
+     ""
+    ]
+   ]
+  },
   "raamdorpel": {
    "nl": "Raamdorpel",
    "en": "Window sill (exterior)",
@@ -626,11 +661,6 @@
      "diameter and length"
     ]
    ]
-  },
-  "vrij": {
-   "nl": "Vrij (eigen lijst)",
-   "en": "Free (own list)",
-   "items": []
   }
  },
  "DEFAULT_OUTLINE_PARAMS": {

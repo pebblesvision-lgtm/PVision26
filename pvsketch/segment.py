@@ -69,7 +69,8 @@ def polygon_mask(shape: tuple[int, int], polygon: Sequence[Sequence[float]], sca
 
 def grabcut(img: np.ndarray, rect: Sequence[float] | None = None, strokes: Sequence[Stroke] = (),
             polygon: Sequence[Sequence[float]] | None = None, band_px: float = 20.0,
-            iters: int = 5, keep_largest: bool = True, fill_holes: bool = True) -> np.ndarray:
+            iters: int = 5, keep_largest: bool = True, fill_holes: bool = True,
+            region: np.ndarray | None = None, seed: bool = False) -> np.ndarray:
     """Return a binary mask (uint8, 255 = stone) in rectified-image pixels.
 
     ``rect`` is (x, y, w, h); ``polygon`` a list of points; both in the same
@@ -86,16 +87,31 @@ def grabcut(img: np.ndarray, rect: Sequence[float] | None = None, strokes: Seque
     mask = np.full((wh, ww), cv2.GC_BGD, np.uint8)
     gc_rect = None
 
+    region_mask = None
     if polygon is not None and len(polygon) >= 3:
-        poly = polygon_mask((wh, ww), polygon, scale)
+        region_mask = polygon_mask((wh, ww), polygon, scale)
+    elif region is not None:
+        region_mask = np.where(cv2.resize(region, (ww, wh), interpolation=cv2.INTER_NEAREST) > 0, 255, 0).astype(np.uint8)
+    if seed and region_mask is not None and region_mask.any():
+        # Only painted stone: the paint is certain, the rest of the photo is "probably background";
+        # GrabCut grows the stone outwards from the paint.
+        # Paint may overshoot the edge, so only its core is certain.
+        dist_in = cv2.distanceTransform(region_mask, cv2.DIST_L2, 5)
+        mask[:] = cv2.GC_PR_BGD
+        mask[region_mask > 0] = cv2.GC_PR_FGD
+        mask[dist_in >= 0.6 * float(dist_in.max())] = cv2.GC_FGD
+        gc_rect = (0, 0, ww, wh)
+    elif region_mask is not None and region_mask.any():
+        # The points / paint are a rough guess: inside is only "probably stone" (a loose polygon
+        # contains sky or wall too); only the deep core is certain, the band outside is "probably background".
         band = max(2, int(round(band_px * scale)))
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * band + 1, 2 * band + 1))
-        inner = cv2.erode(poly, k)
-        outer = cv2.dilate(poly, k)
-        mask[outer > 0] = cv2.GC_PR_BGD
-        mask[poly > 0] = cv2.GC_PR_FGD
-        mask[inner > 0] = cv2.GC_FGD
-        x, y, rw, rh = cv2.boundingRect(outer)
+        dist_in = cv2.distanceTransform(region_mask, cv2.DIST_L2, 5)
+        dist_out = cv2.distanceTransform(255 - region_mask, cv2.DIST_L2, 5)
+        outer = (region_mask > 0) | (dist_out <= band)
+        mask[outer] = cv2.GC_PR_BGD
+        mask[region_mask > 0] = cv2.GC_PR_FGD
+        mask[dist_in > max(band, 0.6 * float(dist_in.max()))] = cv2.GC_FGD
+        x, y, rw, rh = cv2.boundingRect(outer.astype(np.uint8))
         gc_rect = (x, y, rw, rh)
     elif rect is not None:
         x, y, rw, rh = [float(v) for v in rect]
@@ -106,11 +122,12 @@ def grabcut(img: np.ndarray, rect: Sequence[float] | None = None, strokes: Seque
         gc_rect = (x0, y0, x1 - x0, y1 - y0)
         mask[y0:y1, x0:x1] = cv2.GC_PR_FGD
     else:
-        raise ValueError("need a box or a polygon")
+        raise ValueError("need a box, points or painted stone")
 
     layer = stroke_layer((wh, ww), strokes, scale) if strokes else None
     if layer is not None:
-        mask[layer == LBL_FG] = cv2.GC_FGD
+        if not seed:                          # (seed: the paint was handled above, it may overshoot)
+            mask[layer == LBL_FG] = cv2.GC_FGD
         mask[layer == LBL_BG] = cv2.GC_BGD
 
     bgd = np.zeros((1, 65), np.float64)
@@ -120,7 +137,7 @@ def grabcut(img: np.ndarray, rect: Sequence[float] | None = None, strokes: Seque
     if not has_fg or not has_bg:
         raise ValueError("the box/polygon must leave some background around the stone")
 
-    if polygon is None and layer is None:
+    if region_mask is None and layer is None:
         cv2.grabCut(work, mask, gc_rect, bgd, fgd, int(iters), cv2.GC_INIT_WITH_RECT)
     else:
         cv2.grabCut(work, mask, gc_rect, bgd, fgd, int(iters), cv2.GC_INIT_WITH_MASK)
@@ -129,7 +146,8 @@ def grabcut(img: np.ndarray, rect: Sequence[float] | None = None, strokes: Seque
     out = cv2.morphologyEx(out, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
     # hard constraints win over GrabCut's opinion
     if layer is not None:
-        out[layer == LBL_FG] = 255
+        if not seed:
+            out[layer == LBL_FG] = 255
         out[layer == LBL_BG] = 0
 
     if keep_largest:
@@ -140,6 +158,16 @@ def grabcut(img: np.ndarray, rect: Sequence[float] | None = None, strokes: Seque
         out = cv2.resize(out, (w, h), interpolation=cv2.INTER_LINEAR)
         out = np.where(out > 127, 255, 0).astype(np.uint8)
     return out
+
+
+def apply_edits(base: np.ndarray, edits: Sequence[Stroke]) -> np.ndarray:
+    """Brush edits after a run: stone adds to the mask, background (gum) removes."""
+    m = base.copy()
+    if edits:
+        layer = stroke_layer(m.shape[:2], edits)
+        m[layer == LBL_FG] = 255
+        m[layer == LBL_BG] = 0
+    return m
 
 
 def exact_polygon(img_shape: tuple[int, int], polygon: Sequence[Sequence[float]],
@@ -163,12 +191,15 @@ def largest_component(mask: np.ndarray) -> np.ndarray:
 
 
 def fill_mask_holes(mask: np.ndarray) -> np.ndarray:
-    """Fill enclosed holes (staining/dark pockets that GrabCut dropped)."""
+    """Fill enclosed holes (staining/dark pockets that GrabCut dropped). Background is
+    flooded from the whole border (via a 1-px frame), so a stone touching two image
+    edges doesn't turn the far side into a 'hole'."""
     h, w = mask.shape
-    ff = mask.copy()
-    border = np.zeros((h + 2, w + 2), np.uint8)
+    ff = np.zeros((h + 2, w + 2), np.uint8)
+    ff[1:-1, 1:-1] = mask
+    border = np.zeros((h + 4, w + 4), np.uint8)
     cv2.floodFill(ff, border, (0, 0), 255)
-    holes = cv2.bitwise_not(ff)
+    holes = cv2.bitwise_not(ff[1:-1, 1:-1])
     return cv2.bitwise_or(mask, holes)
 
 
