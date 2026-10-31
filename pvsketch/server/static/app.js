@@ -443,6 +443,14 @@
     $("#project-title").textContent = p ? `${p.name}  ·  ${p.id}` : "";
     updateUndoButtons();
   }
+  const TOUCH = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  function touchHint() {
+    if (!TOUCH) return;
+    const h = $("#viewer-hint");
+    h.textContent = h.textContent
+      .replace(/ · (wheel|scrollwiel) = zoom · (right-drag|rechts slepen) = (pan|verschuiven)/, LANG === "nl" ? " · twee vingers = zoom / verschuiven" : " · two fingers = zoom / pan")
+      .replace(/ · (right-drag|rechts slepen) = (pan|verschuiven)( · Ctrl\+Z (undo|ongedaan))?/, LANG === "nl" ? " · twee vingers = zoom / verschuiven" : " · two fingers = zoom / pan");
+  }
   async function goStep(step) {
     S.step = step;
     for (const pane of $$(".pane")) pane.hidden = pane.dataset.pane !== step;
@@ -458,6 +466,7 @@
       if (step === "draw") { hint.textContent = t("Click the corners of the area, then Close region (or double-click) · right-drag = pan"); await showImage("rectified"); await loadDrawing(); await ensureFinishKinds(); renderDrawTables(); }
       if (step === "export") { hint.textContent = ""; await showImage("rectified"); await loadDrawing(); setupExport(); await renderViews(); }
     } catch (e) { toast(e.message, true); }
+    touchHint();
     updateUndoButtons();
     draw();
   }

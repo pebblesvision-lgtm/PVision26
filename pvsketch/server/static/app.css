@@ -10,7 +10,7 @@ header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; min
 .brand { font-weight: 700; letter-spacing: .3px; }
 .brand .muted { font-weight: 400; margin-left: 8px; }
 .header-right { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
-#lang { background: #12151a; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+#lang { width: auto; background: #12151a; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
 .muted { color: var(--muted); } .small { font-size: 12px; }
 nav#steps { display: flex; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
 nav#steps .step { flex: 1; background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 6px; cursor: pointer; }
